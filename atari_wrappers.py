@@ -224,21 +224,22 @@ class LazyFrames(object):
 
 
 def wrap_atari(env, config):
+    assert 'NoFrameskip' in env.spec.id
+    env = NoopResetEnv(env, config.noop_max)
+    env = MaxAndSkipEnv(env, config.frame_skip)
+
     if config.episode_life:
         env = EpisodicLifeEnv(env)
+
     if 'FIRE' in env.unwrapped.get_action_meanings():
         env = FireResetEnv(env)
+
     env = WarpFrame(env, config.frame_size)
+
     if config.stack_frames:
         if config.stack_actions:
             env = FrameActionStack(env, config.stack_frames)
         else:
             env = FrameStack(env, config.stack_frames)
-    return env
 
-def make_atari(config):
-    env = gym.make(config.environment)
-    assert 'NoFrameskip' in env.spec.id
-    env = NoopResetEnv(env, config.noop_max)
-    env = MaxAndSkipEnv(env, config.frame_skip)
     return env

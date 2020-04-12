@@ -1,17 +1,56 @@
-from atari_wrappers import make_atari, wrap_atari
+from atari_wrappers import wrap_atari
 from torch.optim.lr_scheduler import ExponentialLR
 from torch.optim import RMSprop, Adam, SGD
 from torch.nn import MSELoss, LogSoftmax
-from networks import Network
+from networks import MuZeroNetwork, FCNetwork
+from torchsummary import summary
+import numpy as np
+import torch
+import gym
+
+def print_network_summary(network, input_shapes):
+    input_shapes = []
+    replace_characters = ['(', ')', ' ']
+    for input_shape in config.input_shapes:
+      for character in replace_characters:
+        input_shape = input_shape.replace(character, '')
+      input_shape = tuple(map(lambda x: int(x), input_shape.split(',')))
+      input_shapes.append(input_shape)
+
+    summary(network.representation, input_shapes[0])
+    summary(network.prediction, input_shapes[1])
+    summary(network.dynamics, input_shapes[2])
 
 def get_environment(config):
-    env = make_atari(config)
-    env = wrap_atari(env, config)
+    if 'atari' in config.environment_type: 
+      if 'box' in config.environment_type:
+        raise NotImplementedError
+      env = gym.make(config.environment_id)
+      if config.wrap_atari:
+        env = wrap_atari(env, config)
+    else:
+      raise NotImplementedError
     return env
 
-def get_networks(config):
+def get_network(config, device):
     env = get_environment(config)
-    network = Network(action_space=env.action_space.n)
+    action_space = env.action_space.n
+
+    if config.architecture == 'MuzeroNetwork':
+      input_channels = config.stack_frames
+      if config.stack_actions:
+        input_channels *= 2
+      network = MuzeroNetwork(input_channels, action_space, device)
+
+    elif config.architecture == 'EquivNetwork':
+      raise NotImplementedError
+
+    elif config.architecture == 'FCNetwork':
+      input_dim = np.shape(env.observation_space)[0]
+      network = FCNetwork(input_dim, action_space, device)
+
+    else:
+      raise NotImplementedError
     return network
 
 def get_loss_functions(config):
@@ -19,7 +58,7 @@ def get_loss_functions(config):
         loss = (-target_policy * LogSoftmax(dim=1)(policy_logits)).sum(1)
         return loss
     if config.scalar_loss == 'MSELoss':
-        scalar_loss = MSELoss()
+        scalar_loss = MSELoss(reduction='none')
     else:
         raise NotImplementedError
     if config.policy_loss == 'CrossEntropyLoss':
@@ -28,140 +67,62 @@ def get_loss_functions(config):
         raise NotImplementedError
     return scalar_loss, policy_loss
 
-from torch.optim import RMSprop, Adam, SGD
-
 def get_optimizer(config, parameters):
     if config.optimizer == 'RMSprop':
-        optimizer = RMSprop(parameters, lr=config.lr_init, momentum=config.momentum, eps=0.01)
+        optimizer = RMSprop(parameters, lr=config.lr_init, momentum=config.momentum, eps=0.01, weight_decay=config.weight_decay)
     elif config.optimizer == 'Adam':
-        optimizer = Adam(parameters, lr=config.lr_init, weight_decay=config.weight_decay)
+        optimizer = Adam(parameters, lr=config.lr_init, weight_decay=config.weight_decay, eps=0.00015)
     elif config.optimizer == 'SGD':
         optimizer = SGD(parameters, lr=config.lr_init, momentum=config.momentum, weight_decay=config.weight_decay)
     else:
         raise NotImplementedError
     return optimizer
 
+def to_numpy(x):
+  return x.detach().cpu().numpy()
+
+def to_torch(x, device, dtype=torch.float32):
+  x = np.array(x)
+  return torch.tensor(x, dtype=dtype, device=device)# / 255.0
+
+def get_error(root, initial_inference):
+    return (root.value() - initial_inference.value.item())
+
+
+class MuZeroLR():
+
+  def __init__(self, optimizer, config):
+    self.optimizer = optimizer
+    self.lr_decay_steps = config.lr_decay_steps
+    self.lr_decay_rate = config.lr_decay_rate
+    self.lr_init = config.lr_init
+    self.lr_step = 0
+
+  def step(self):
+    self.lr_step += 1
+    lr = self.lr_init * self.lr_decay_rate ** (self.lr_step / self.lr_decay_steps)
+    for param_group in self.optimizer.param_groups:
+        param_group["lr"] = lr
+
+
 def get_lr_scheduler(config, optimizer):
     if config.lr_scheduler:
         if config.lr_scheduler == 'ExponentialLR':
-            lr_scheduler = ExponentialLR(optimizer, config.lr_decay_rate)
+          lr_scheduler = ExponentialLR(optimizer, config.lr_decay_rate)
+        elif config.lr_scheduler == 'MuZeroLR':
+          lr_scheduler = MuZeroLR(optimizer, config)
+        elif config.lr_scheduler == '':
+          lr_scheduler = None
         else:
             raise NotImplementedError
-    else:
-        lr_scheduler = None
     return lr_scheduler
 
-
-MAXIMUM_FLOAT_VALUE = float('inf')
-
-class MinMaxStats(object):
-
-  def __init__(self):
-    self.maximum = -MAXIMUM_FLOAT_VALUE
-    self.minimum = MAXIMUM_FLOAT_VALUE
-
-  def update(self, value: float):
-    self.maximum = max(self.maximum, value)
-    self.minimum = min(self.minimum, value)
-
-  def normalize(self, value: float) -> float:
-    if self.maximum > self.minimum:
-      return (value - self.minimum) / (self.maximum - self.minimum)
-    return value
-
-
-class ActionHistory(object):
-
-    def __init__(self, history):
-        self.history = list(history)
-
-    def clone(self):
-        return ActionHistory(self.history)
-
-    def add_action(self, action):
-        self.history.append(action)
-
-    def last_action(self):
-        return self.history[-1]
-
-
-class Node(object):
-
-    def __init__(self, prior):
-        self.visit_count = 0
-        self.prior = prior
-        self.value_sum = 0
-        self.children = {}
-        self.hidden_state = None
-        self.reward = 0
-
-    def expanded(self):
-        return len(self.children) > 0
-
-    def value(self):
-        if self.visit_count == 0:
-          return 0
-        return self.value_sum / self.visit_count
-
-
-class Game(object):
-
-    def __init__(self, environment, discount):
-        self.environment = environment
-        observation = self.environment.reset()
-        self.observations = []
-        self.observations.append(observation)
-        self.action_history = []
-        self.rewards = []
-        self.life_loss = []
-        self.child_visits = []
-        self.root_values = []
-        self.discount = discount
-
-    def terminal(self):
-        return True if self.environment.was_real_done else False
-
-    def apply(self, action):
-        observation, reward, done, info = self.environment.step(action)
-        self.observations.append(observation)
-        self.rewards.append(reward)
-        self.action_history.append(action)
-        self.life_loss.append(done)
-        if done:
-          self.environment.reset()
-
-    def store_search_statistics(self, root):
-        sum_visits = sum(child.visit_count for child in root.children.values())
-        self.child_visits.append([child.visit_count / sum_visits for child in root.children.values()])
-        self.root_values.append(root.value())
-
-    def make_image(self, state_index, device):
-        obs = self.observations[state_index]
-        image = torch.tensor(np.float32(obs), dtype=torch.float32, device=device) / 255.0
-        return image
-
-    def make_target(self, state_index, num_unroll_steps, td_steps):
-
-        life_loss_indexes = self.life_loss[state_index:state_index + num_unroll_steps + 1]
-        life_index = life_loss_indexes.index(True)
-
-        targets = []
-        for current_index in range(state_index, state_index + num_unroll_steps + 1):
-            bootstrap_index = current_index + td_steps
-
-            for i, reward in enumerate(self.rewards[current_index:bootstrap_index]):
-              value = reward * self.discount**i
-
-            if bootstrap_index < life_index:
-              value += self.root_values[bootstrap_index] * self.discount**td_steps
-
-            if current_index > 0 and current_index <= len(self.rewards):
-                last_reward = self.rewards[current_index - 1]
-            else:
-                last_reward = 0
-
-            if current_index < life_index:
-              targets.append((value, last_reward, self.child_visits[current_index]))
-            else:
-              targets.append((0, 0, []))
-        return targets
+def select_action(node, temperature=0):
+    visit_counts = [child.visit_count for child in node.children]
+    if temperature:
+      distribution = np.array([visit_count**(1 / temperature) for visit_count in visit_counts])
+      distribution = distribution / sum(distribution)
+      action = np.random.choice(len(visit_counts), p=distribution)
+    else:
+      action = np.argmax(visit_counts)
+    return action

@@ -1,22 +1,48 @@
-import ray
-import torch
-import math
-from networks import Network
-from utils import get_environment
+from utils import get_network, get_environment, select_action, to_torch, get_error
+from mcts import MCTS, Node
+from logger import Logger
+import numpy as np
+import datetime
+import pytz
 import time
+import torch
+import ray
 
 
-@ray.remote
-class Actor(object):
-    def __init__(self, actor_id, config, storage, replay_buffer):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.id = actor_id
+@ray.remote(num_cpus=2)
+class Actor(Logger):
+
+    def __init__(self, run_tag, worker_id, config, storage, replay_buffer):
+        self.run_tag = run_tag
+        self.worker_id = 'actor-{}'.format(worker_id)
+        self.config = config
         self.storage = storage
         self.replay_buffer = replay_buffer
-        self.config = config
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.environment = get_environment(config)
-        self.action_space = self.environment.action_space.n
-        self.network = Network(self.config, self.device)
+        self.network = get_network(config, self.device)
+        self.mcts = MCTS(config)
+        self.select_action = select_action
+        self.get_error = get_error
+        self.to_torch = to_torch
+
+        self.training_step = 0
+        self.games_played = 0
+        self.sum_rewards = 0
+        self.sum_lengths = 0
+
+        if 'actors' in self.config.verbose:
+          self.verbose = True
+        else:
+          self.verbose = False
+
+        if 'actors' in self.config.log:
+          self.log = True
+        else:
+          self.log = False
+
+        Logger.__init__(self)
 
     def run_selfplay(self):
 
@@ -24,100 +50,65 @@ class Actor(object):
             time.sleep(1)
 
         while True:
-
             weights = ray.get(self.storage.latest_weights.remote())
             self.network.load_weights(weights)
 
             game = self.play_game()
-            self.replay_buffer.save_game.remote(game)
+
+            self.games_played += 1
+            self.sum_rewards += game.sum_rewards
+            self.sum_lengths += game.step
+
+            if self.verbose:
+              date = datetime.datetime.now(tz=pytz.timezone('Europe/Stockholm')).strftime("%d-%b-%Y_%H:%M:%S")
+              print("[{}] Training step {}, Game {} --> length: {}, return: {}".format(date, self.training_step, self.games_played, game.step, game.sum_rewards))
+
+            if self.log and self.games_played % self.config.actor_log_frequency == 0:
+              self.log_scalar(tag='games/return', value=(self.sum_rewards/self.config.actor_log_frequency), i=self.games_played)
+              self.log_scalar(tag='games/length', value=(self.sum_lengths/self.config.actor_log_frequency), i=self.games_played)
+              self.sum_rewards = 0
+              self.sum_lengths = 0
 
     def play_game(self):
         game = self.config.new_game(self.environment)
 
-        while not game.terminal() and len(game.action_history) < config.max_moves:
+        while not game.terminal and game.step < self.config.max_steps:
 
-            current_observation = game.make_image(-1)
-            initial_inference = self.network.initial_inference(current_observation)
-            root = Node(0)
-            self.expand_node(root, initial_inference)
-            self.add_exploration_noise(root)
+          root = Node(0)
 
-            self.run_mcts(root, game.action_history)
-            action = self.select_action(root)
-            game.apply(action)
-            game.store_search_statistics(root)
+          current_observation = self.to_torch(game.get_observation(-1), self.device).unsqueeze(0).detach()
+          initial_inference = self.network.initial_inference(current_observation)
 
-        game.environment = None
+          root.expand(network_output=initial_inference)
+          root.add_exploration_noise(self.config.root_dirichlet_alpha, self.config.root_exploration_fraction)
+
+          self.mcts.run(root, self.network)
+
+          error = self.get_error(root, initial_inference)
+          game.history.errors.append(error)
+
+          temperature = self.get_temperature()
+          action = self.select_action(root, temperature)
+
+          game.apply(action)
+          game.store_search_statistics(root)
+
+          if (game.step % self.config.save_frequency) == 0 or game.terminal:
+            overlap = self.config.num_unroll_steps + self.config.td_steps
+            length = self.config.save_frequency + overlap
+            history = game.get_history_sequence(length)
+            ignore = overlap if not game.terminal else None
+            history = game.history
+            self.replay_buffer.save_history.remote(history, ignore=None)
+
         return game
 
-    def run_mcts(self, root, action_history):
-          min_max_stats = MinMaxStats(self.config.known_bounds)
-
-          for _ in range(self.config.num_simulations):
-            history = action_history.copy()
-            node = root
-            search_path = [node]
-
-            while node.expanded():
-              action, node = self.select_child(self.config, node, min_max_stats)
-              history.add_action(action)
-              search_path.append(node)
-
-            # Inside the search tree we use the dynamics function to obtain the next
-            # hidden state given an action and the previous hidden state.
-            parent = search_path[-2]
-            network_output = self.network.recurrent_inference(parent.hidden_state, history.last_action())
-            self.expand_node(node, network_output)
-
-            self.backpropagate(search_path, network_output.value, self.config.discount, min_max_stats)
-
-    def expand_node(self, node, network_output):
-          node.hidden_state = network_output.hidden_state
-          node.reward = network_output.reward
-          policy = {a: math.exp(network_output.policy_logits[a]) for a in range(self.action_space)}
-          policy_sum = sum(policy.values())
-          for action, p in policy.items():
-            node.children[action] = Node(p / policy_sum)
-
-    def backpropagate(search_path, value, discount, min_max_stats):
-          for node in reversed(search_path):
-            node.value_sum += value
-            node.visit_count += 1
-            min_max_stats.update(node.value())
-
-            value = node.reward + discount * value
-
-    def ucb_score(self, parent, child, min_max_stats) -> float:
-          pb_c = math.log((parent.visit_count + self.config.pb_c_base + 1) / self.config.pb_c_base) + self.config.pb_c_init
-          pb_c *= math.sqrt(parent.visit_count) / (child.visit_count + 1)
-
-          prior_score = pb_c * child.prior
-          value_score = min_max_stats.normalize(child.value())
-          return prior_score + value_score
-
-    def select_child(self, node, min_max_stats):
-          _, action, child = max((self.ucb_score(node, child, min_max_stats), action, child) for action, child in node.children.items())
-          return action, child
-
-    def select_action(self, node):
-          visit_counts, actions = list(zip(*[(child.visit_count, action) for child in node.children.items()]))
-          temperature = self.config.visit_softmax_temperature_fn(training_steps=self.network.training_steps)
-          action = self.action_sample(visit_counts, actions, temperature)
-          return action
-
-    def action_sample(visit_counts, actions, temperature):
-        distribution = np.array([visit_count**(1 / temperature) for visit_count in visit_counts])
-        distribution = distribution / sum(distribution)
-        action = np.random.choice(actions, p=distribution)
-        return action
-
-    def add_exploration_noise(self, node):
-        actions = list(node.children.keys())
-        noise = np.random.dirichlet([self.config.root_dirichlet_alpha] * len(actions))
-        frac = self.config.root_exploration_fraction
-        for a, n in zip(actions, noise):
-            node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
+    def get_temperature(self):
+        training_step = ray.get(self.storage.get_stats.remote(tag="training step"))
+        self.training_step = training_step
+        temperature = self.config.visit_softmax_temperature(training_step)
+        return temperature
 
     def launch(self):
-        print("Actor {} is online.".format(self.id))
+        print("{} is online.".format(self.worker_id.capitalize()))
         self.run_selfplay()
