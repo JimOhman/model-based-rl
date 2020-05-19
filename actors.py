@@ -1,6 +1,7 @@
-from utils import get_network, get_environment, select_action, to_torch, get_error
+from utils import get_network, get_environment
 from mcts import MCTS, Node
 from logger import Logger
+from copy import deepcopy
 import numpy as np
 import datetime
 import pytz
@@ -9,106 +10,110 @@ import torch
 import ray
 
 
-@ray.remote(num_cpus=2)
+@ray.remote
 class Actor(Logger):
 
-    def __init__(self, run_tag, worker_id, config, storage, replay_buffer):
+    def __init__(self, worker_id, config, storage, replay_buffer, state=None, run_tag=None, date=None):
         self.run_tag = run_tag
         self.worker_id = 'actor-{}'.format(worker_id)
-        self.config = config
+        self.config = deepcopy(config)
         self.storage = storage
         self.replay_buffer = replay_buffer
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.environment = get_environment(config)
-        self.network = get_network(config, self.device)
         self.mcts = MCTS(config)
-        self.select_action = select_action
-        self.get_error = get_error
-        self.to_torch = to_torch
 
-        self.training_step = 0
-        self.games_played = 0
-        self.sum_rewards = 0
-        self.sum_lengths = 0
+        self.network = get_network(config, self.device)
+        self.network.eval()
 
-        if 'actors' in self.config.verbose:
-          self.verbose = True
-        else:
-          self.verbose = False
+        self.training_step, self.games_played = 0, 0
+        self.return_to_log, self.length_to_log = 0, 0
 
-        if 'actors' in self.config.log:
-          self.log = True
-        else:
-          self.log = False
+        if state is not None:
+          self.load_state(state, date)
 
-        Logger.__init__(self)
+        self.verbose = True if 'actors' in self.config.verbose else False
+        self.render = True if 'actors' in self.config.render else False
+        self.log = True if 'actors' in self.config.log else False
+
+        if self.log:
+          Logger.__init__(self)
+
+    def load_state(self, state, date):
+        self.network.load_state_dict(state['weights'])
+        self.training_step = state['step']
+        old_run_tag = state['dirs']['base'].split('/')[-1]
+        self.run_tag = old_run_tag + '_resumed_' + date
+
+    def sync_weights(self, force=False):
+        weights, training_step = ray.get(self.storage.latest_weights.remote())
+        if training_step != self.training_step:
+          self.network.load_weights(weights)
+          self.training_step = training_step
+        elif force:
+          self.network.load_weights(weights)
 
     def run_selfplay(self):
-
-        while ray.get(self.storage.latest_weights.remote()) is None:
+        while ray.get(self.storage.latest_weights.remote())[0] is None:
             time.sleep(1)
 
-        while True:
-            weights = ray.get(self.storage.latest_weights.remote())
-            self.network.load_weights(weights)
+        self.sync_weights(force=True)
 
+        while self.training_step < self.config.training_steps:
             game = self.play_game()
 
+            self.return_to_log += game.sum_rewards
+            self.length_to_log += game.step
             self.games_played += 1
-            self.sum_rewards += game.sum_rewards
-            self.sum_lengths += game.step
 
             if self.verbose:
               date = datetime.datetime.now(tz=pytz.timezone('Europe/Stockholm')).strftime("%d-%b-%Y_%H:%M:%S")
-              print("[{}] Training step {}, Game {} --> length: {}, return: {}".format(date, self.training_step, self.games_played, game.step, game.sum_rewards))
+              print("{}: [{}] Step {}, Game {} --> length: {}, return: {}".format(self.worker_id.capitalize(), date, self.training_step,
+                                                                                  self.games_played, game.step, game.sum_rewards))
 
             if self.log and self.games_played % self.config.actor_log_frequency == 0:
-              self.log_scalar(tag='games/return', value=(self.sum_rewards/self.config.actor_log_frequency), i=self.games_played)
-              self.log_scalar(tag='games/length', value=(self.sum_lengths/self.config.actor_log_frequency), i=self.games_played)
-              self.sum_rewards = 0
-              self.sum_lengths = 0
+              return_to_log = self.return_to_log / self.config.actor_log_frequency
+              length_to_log = self.length_to_log / self.config.actor_log_frequency
+              self.log_scalar(tag='games/return', value=return_to_log, i=self.games_played)
+              self.log_scalar(tag='games/length', value=length_to_log, i=self.games_played)
+              self.return_to_log = 0
+              self.length_to_log = 0
+
+            self.sync_weights()
 
     def play_game(self):
-        game = self.config.new_game(self.environment)
+      game = self.config.new_game(self.environment)
+      temperature = self.config.visit_softmax_temperature(self.training_step)
+      while not game.terminal and game.step < self.config.max_steps:
+        root = Node(0)
 
-        while not game.terminal and game.step < self.config.max_steps:
+        current_observation = self.config.to_torch(game.get_observation(-1), self.device, scale=255.0).unsqueeze(0)
+        initial_inference = self.network.initial_inference(current_observation)
 
-          root = Node(0)
+        root.expand(network_output=initial_inference)
+        root.add_exploration_noise(self.config.root_dirichlet_alpha, self.config.root_exploration_fraction)
 
-          current_observation = self.to_torch(game.get_observation(-1), self.device).unsqueeze(0).detach()
-          initial_inference = self.network.initial_inference(current_observation)
+        self.mcts.run(root, self.network)
 
-          root.expand(network_output=initial_inference)
-          root.add_exploration_noise(self.config.root_dirichlet_alpha, self.config.root_exploration_fraction)
+        error = root.value() - initial_inference.value.item()
+        game.history.errors.append(error)
 
-          self.mcts.run(root, self.network)
+        action = self.config.select_action(root, temperature)
 
-          error = self.get_error(root, initial_inference)
-          game.history.errors.append(error)
+        game.apply(action)
+        game.store_search_statistics(root)
 
-          temperature = self.get_temperature()
-          action = self.select_action(root, temperature)
+        if game.step % self.config.max_sequence_length == 0 or game.done:
+          overlap = self.config.num_unroll_steps + self.config.td_steps
+          ignore = overlap if not game.done else None
+          collect_from = max(0, game.previous_collect_to - overlap)
+          history = game.get_history_sequence(collect_from)
+          self.replay_buffer.save_history.remote(history, ignore=ignore)
 
-          game.apply(action)
-          game.store_search_statistics(root)
-
-          if (game.step % self.config.save_frequency) == 0 or game.terminal:
-            overlap = self.config.num_unroll_steps + self.config.td_steps
-            length = self.config.save_frequency + overlap
-            history = game.get_history_sequence(length)
-            ignore = overlap if not game.terminal else None
-            history = game.history
-            self.replay_buffer.save_history.remote(history, ignore=None)
-
-        return game
-
-    def get_temperature(self):
-        training_step = ray.get(self.storage.get_stats.remote(tag="training step"))
-        self.training_step = training_step
-        temperature = self.config.visit_softmax_temperature(training_step)
-        return temperature
+      return game
 
     def launch(self):
         print("{} is online.".format(self.worker_id.capitalize()))
-        self.run_selfplay()
+        with torch.no_grad():
+            self.run_selfplay()

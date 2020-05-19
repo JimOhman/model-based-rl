@@ -1,14 +1,17 @@
 from torch.nn import Softmax
 import numpy as np
+import random
 import torch
 import math
+
+softmax = Softmax(dim=0)
 
 
 class MinMaxStats(object):
 
   def __init__(self, maximum_bound=None, minimum_bound=None):
-    self.maximum = -float('inf')
-    self.minimum = float('inf')
+    self.maximum = -float('inf') if maximum_bound is None else maximum_bound
+    self.minimum = float('inf')  if minimum_bound is None else minimum_bound
 
   def update(self, value: float):
     self.maximum = max(self.maximum, value)
@@ -19,9 +22,9 @@ class MinMaxStats(object):
       return (value - self.minimum) / (self.maximum - self.minimum)
     return value
 
-  def reset(self):
-    self.maximum = -float('inf')
-    self.minimum = float('inf')
+  def reset(self, maximum_bound=None, minimum_bound=None):
+    self.maximum = -float('inf') if maximum_bound is None else maximum_bound
+    self.minimum = float('inf')  if minimum_bound is None else minimum_bound
 
 
 class Node(object):
@@ -34,8 +37,6 @@ class Node(object):
         self.children = []
         self.prior = prior
 
-        self.softmax = Softmax(dim=0)
-
     def expanded(self):
         return len(self.children) > 0
 
@@ -46,8 +47,9 @@ class Node(object):
 
     def expand(self, network_output):
         self.hidden_state = network_output.hidden_state
-        self.reward = network_output.reward.item()
-        policy = self.softmax(network_output.policy_logits.squeeze())
+        if self.reward:
+          self.reward = network_output.reward.item()
+        policy = torch.softmax(network_output.policy_logits.squeeze(), dim=0)
         for action, p in enumerate(policy):
           self.children.append(Node(p.item()))
 
@@ -76,20 +78,26 @@ class MCTS(object):
           search_path = [node]
 
           while node.expanded():
+            [self.min_max_stats.update(child.value()) for child in node.children]
+
             action, node = self.select_child(node)
+
             search_path.append(node)
 
           parent = search_path[-2]
           last_action = [action]
-          
+
           network_output = network.recurrent_inference(parent.hidden_state, last_action)
           node.expand(network_output)
 
           self.backpropagate(search_path, network_output.value.item())
 
     def select_child(self, node):
-        action = np.argmax([self.ucb_score(node, child) for child in node.children])
-        child = node.children[action]
+        if node.visit_count == 0:
+          action, child = random.choice(list(enumerate(node.children)))
+        else:
+          action = np.argmax([self.ucb_score(node, child) for child in node.children])
+          child = node.children[action]
         return action, child
 
     def ucb_score(self, parent, child):
@@ -100,7 +108,7 @@ class MCTS(object):
         return prior_score + value_score
 
     def backpropagate(self, search_path, value):
-        for i, node in enumerate(reversed(search_path)):
+        for idx, node in enumerate(reversed(search_path)):
           node.value_sum += value
           node.visit_count += 1
           self.min_max_stats.update(node.value())

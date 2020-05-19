@@ -3,6 +3,7 @@ import numpy as np
 import random
 import ray
 
+
 @ray.remote
 class ReplayBuffer(object):
 
@@ -109,8 +110,10 @@ class PrioritizedReplay():
         
         self.tree = SumTree(capacity=self.window_size)
 
+        self.throughput = 0
+
     def get_priorities(self, errors):
-        return (np.abs(errors) + self.epsilon) ** self.alpha
+        return np.power((np.abs(errors) + self.epsilon), self.alpha)
 
     def save_history(self, history, ignore=None):
         if ignore is not None:
@@ -119,12 +122,19 @@ class PrioritizedReplay():
           priorities = self.get_priorities(history.errors)
         self.tree.add(priorities, history)
 
+        self.throughput += len(priorities)
+
     def sample_batch(self):
         priorities = []
         batch = []
+        batch_observations = []
+        batch_actions = []
+        batch_targets = []
         idxs = []
+        steps = []
 
-        self.beta = np.min([1., self.beta + self.beta_increment_per_sampling])
+        if self.beta < 1:
+            self.beta = np.min([1., self.beta + self.beta_increment_per_sampling])
 
         priority_segment = self.tree.total_priority / self.batch_size
         for i in range(self.batch_size):
@@ -135,6 +145,7 @@ class PrioritizedReplay():
 
             priorities.append(priority)
             idxs.append(idx)
+            steps.append(step)
 
             observation = history.observations[step]
 
@@ -145,9 +156,11 @@ class PrioritizedReplay():
 
             target = self.make_target(history, step, num_actions)
             
-            batch.append((observation, actions, target))
+            batch_observations.append(observation)
+            batch_actions.append(actions)
+            batch_targets.append(target)
 
-        batch = list(zip(*batch))
+        batch = [batch_observations, batch_actions, batch_targets]
 
         sampling_probabilities = priorities / self.tree.total_priority
         is_weights = np.power(self.tree.num_memories * sampling_probabilities, -self.beta)
@@ -155,15 +168,13 @@ class PrioritizedReplay():
 
         return batch, idxs, is_weights
 
-    def make_target(self, history, state_index, num_actions):
-        done_indexes = history.dones[state_index:state_index + self.num_unroll_steps + 1]
-        if True in done_indexes:
-          end_index = done_indexes.index(True) + 1
-        else:
-          end_index = len(history.root_values)
+    def make_target(self, history, step, num_actions):
+        done_indexes = history.dones[step:step + self.num_unroll_steps + 1]
+
+        end_index = len(history.root_values)
 
         target_rewards, target_values, target_policies = [], [], []
-        for current_index in range(state_index, state_index + self.num_unroll_steps + 1):
+        for current_index in range(step, step + self.num_unroll_steps + 1):
             bootstrap_index = current_index + self.td_steps
             if bootstrap_index < end_index:
               value = history.root_values[bootstrap_index] * self.discount**self.td_steps
@@ -183,9 +194,9 @@ class PrioritizedReplay():
               target_rewards.append(last_reward)
               target_values.append(value)
             else:
-              random_policy = [(0 / num_actions)] * num_actions
-              target_policies.append(random_policy)
-              target_rewards.append(0)
+              dummy_policy = [0] * num_actions
+              target_policies.append(dummy_policy)
+              target_rewards.append(last_reward)
               target_values.append(0)
 
         return target_rewards, target_values, target_policies
@@ -195,5 +206,8 @@ class PrioritizedReplay():
       for idx, priority in zip(idxs, priorities):
           self.tree.update(idx, priority)
 
-    def get_size(self):
+    def size(self):
       return self.tree.num_memories
+
+    def get_throughput(self):
+      return self.throughput

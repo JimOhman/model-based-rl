@@ -4,8 +4,10 @@ os.environ.setdefault('PATH', '')
 from collections import deque
 import gym
 from gym import spaces
+from distort import distort_frame, move_focal_point, init_focal_point
 import cv2
 cv2.ocl.setUseOpenCL(False)
+
 
 class NoopResetEnv(gym.Wrapper):
     def __init__(self, env, noop_max):
@@ -30,7 +32,8 @@ class NoopResetEnv(gym.Wrapper):
         return obs
 
     def step(self, act):
-        return self.env.step(act)
+        obs, reward, done, info = self.env.step(action)
+        return obs, reward, done, info
 
 
 class FireResetEnv(gym.Wrapper):
@@ -57,7 +60,7 @@ class EpisodicLifeEnv(gym.Wrapper):
     def __init__(self, env):
         gym.Wrapper.__init__(self, env)
         self.lives = 0
-        self.was_real_done  = True
+        self.was_real_done = True
 
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
@@ -143,7 +146,7 @@ class WarpFrame(gym.ObservationWrapper):
 class FrameActionStack(gym.Wrapper):
     def __init__(self, env, stack_frames):
         gym.Wrapper.__init__(self, env)
-        self.k = stack_frames
+        self.k = 2 * stack_frames
         self.frames = deque([], maxlen=self.k)
         shp = env.observation_space.shape
         self.observation_space = spaces.Box(low=0, high=255, shape=(shp[:-1] + (shp[-1] * self.k,)), dtype=env.observation_space.dtype)
@@ -153,14 +156,16 @@ class FrameActionStack(gym.Wrapper):
         for _ in range(self.k):
             act_plane = np.full_like(obs, 0)
             act_plane[0, :] = 1
-            self.frames.append([act_plane, obs])
+            self.frames.append(act_plane)
+            self.frames.append(obs)
         return self._get_ob()
 
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
         num_actions = self.env.action_space.n
         act_plane = np.full_like(obs, 255*(action/num_actions), dtype=np.uint8)
-        self.frames.append([act_plane, obs])
+        self.frames.append(act_plane)
+        self.frames.append(obs)
         return self._get_ob(), reward, done, info
 
     def _get_ob(self):
@@ -190,6 +195,79 @@ class FrameStack(gym.Wrapper):
     def _get_ob(self):
         assert len(self.frames) == self.k
         return LazyFrames(list(self.frames))
+
+class MyopicFrameStack(gym.Wrapper):
+    def __init__(self, env, config):
+        gym.Wrapper.__init__(self, env)
+        self.k = config.frame_stack
+        self.frames = deque([], maxlen=self.k)
+        shp = env.observation_space.shape
+        self.observation_space = spaces.Box(low=0, high=255, shape=(shp[:-1] + (shp[-1] * self.k,)), dtype=env.observation_space.dtype)
+
+        self.focal_points = []
+        self.config = config
+
+    def reset(self):
+        if self.was_real_done:
+            self.focal_points = []
+        obs = self.env.reset()
+        self.focal_point = init_focal_point(config=self.config)
+        obs = distort_frame(frame=obs, focal_point=self.focal_point, config=self.config)
+        for _ in range(self.k):
+            self.frames.append(obs)
+            self.focal_points.append(self.focal_point)
+        return self._get_ob()
+
+    def step(self, action, visual_action):
+        obs, reward, done, info = self.env.step(action)
+        self.focal_point = move_focal_point(action=visual_action, focal_point=self.focal_point, config=self.config)
+        self.focal_points.append(self.focal_point)
+        obs = distort_frame(frame=obs, focal_point=self.focal_point, config=self.config)
+        self.frames.append(obs)
+        return self._get_ob(), reward, done, info
+
+    def _get_ob(self):
+        assert len(self.frames) == self.k
+        return LazyFrames(list(self.frames))
+
+class MyopicFrameActionStack(gym.Wrapper):
+    def __init__(self, env, config):
+        gym.Wrapper.__init__(self, env)
+        self.k = config.frame_stack
+        self.frames = deque([], maxlen=self.k)
+        shp = env.observation_space.shape
+        self.observation_space = spaces.Box(low=0, high=255, shape=(shp[:-1] + (shp[-1] * self.k,)), dtype=env.observation_space.dtype)
+
+        self.focal_points = []
+        self.config = config
+
+    def reset(self):
+        if self.was_real_done:
+            self.focal_points = []
+        obs = self.env.reset()
+        self.focal_point = init_focal_point(config=self.config)
+        obs = distort_frame(frame=obs, focal_point=self.focal_point, config=self.config)
+        for _ in range(self.k):
+            act_plane = np.full_like(obs, 0)
+            act_plane[0, :] = 1
+            self.frames.append(act_plane)
+            self.frames.append(obs)
+            self.focal_points.append(self.focal_point)
+        return self._get_ob()
+
+    def step(self, action, visual_action):
+        obs, reward, done, info = self.env.step(action)
+        self.focal_point = move_focal_point(action=visual_action, focal_point=self.focal_point, config=self.config)
+        self.focal_points.append(self.focal_point)
+        obs = distort_frame(frame=obs, focal_point=self.focal_point, config=self.config)
+        act_plane = np.full_like(obs, 255*(action/num_actions), dtype=np.uint8)
+        self.frames.append(act_plane)
+        self.frames.append(obs)
+        return self._get_ob(), reward, done, info
+
+    def _get_ob(self):
+        assert len(self.frames) == self.k
+        return LazyFrames(list(self.frames))
         
 
 class LazyFrames(object):
@@ -199,7 +277,7 @@ class LazyFrames(object):
 
     def _force(self):
         if self._out is None:
-            self._out = np.concatenate(self._frames)[np.newaxis, ...]
+            self._out = np.array(self._frames)
             self._frames = None
         return self._out
 

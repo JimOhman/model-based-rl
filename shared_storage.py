@@ -8,10 +8,11 @@ class SharedStorage(object):
         self.stats = {'training step': 0}
 
     def latest_weights(self):
-        return self.weights
+        return self.weights, self.stats['training step']
 
-    def store_weights(self, weights):
+    def store_weights(self, weights, step):
         self.weights = weights
+        self.stats['training step'] = step
 
     def get_stats(self, tag=None):
       return self.stats if tag is None else self.stats[tag]
