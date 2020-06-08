@@ -1,10 +1,8 @@
-from torch.nn import Softmax
 import numpy as np
 import random
 import torch
 import math
-
-softmax = Softmax(dim=0)
+from copy import deepcopy
 
 
 class MinMaxStats(object):
@@ -29,88 +27,94 @@ class MinMaxStats(object):
 
 class Node(object):
 
-    def __init__(self, prior):
-        self.hidden_state = None
-        self.visit_count = 0
-        self.value_sum = 0
-        self.reward = 0
-        self.children = []
-        self.prior = prior
+  def __init__(self, prior):
+    self.hidden_state = None
+    self.visit_count = 0
+    self.value_sum = 0
+    self.reward = 0
+    self.children = []
+    self.prior = prior
 
-    def expanded(self):
-        return len(self.children) > 0
+  def expanded(self):
+    return len(self.children) > 0
 
-    def value(self):
-        if self.visit_count == 0:
-          return 0
-        return self.value_sum / self.visit_count
+  def value(self):
+    if self.visit_count == 0:
+      return 0
+    return self.value_sum / self.visit_count
 
-    def expand(self, network_output):
-        self.hidden_state = network_output.hidden_state
-        if self.reward:
-          self.reward = network_output.reward.item()
-        policy = torch.softmax(network_output.policy_logits.squeeze(), dim=0)
-        for action, p in enumerate(policy):
-          self.children.append(Node(p.item()))
+  def expand(self, network_output):
+    self.hidden_state = network_output.hidden_state
+    if network_output.reward:
+      self.reward = network_output.reward.item()
+    policy = torch.softmax(network_output.policy_logits.squeeze(), dim=0)
+    for action, p in enumerate(policy):
+      self.children.append(Node(p.item()))
 
-    def add_exploration_noise(self, dirichlet_alpha, exploration_fraction):
-        noise = np.random.dirichlet([dirichlet_alpha] * len(self.children))
-        frac = exploration_fraction
-        for a, n in enumerate(noise):
-            self.children[a].prior = self.children[a].prior * (1 - frac) + n * frac
+  def add_exploration_noise(self, dirichlet_alpha, exploration_fraction):
+    noise = np.random.dirichlet([dirichlet_alpha] * len(self.children))
+    for a, n in enumerate(noise):
+      self.children[a].prior = self.children[a].prior * (1 - exploration_fraction) + n * exploration_fraction
 
 
 class MCTS(object):
 
-    def __init__(self, config):
-        self.num_simulations = config.num_simulations
-        self.discount = config.discount
-        self.pb_c_base = config.pb_c_base
-        self.pb_c_init = config.pb_c_init
+  def __init__(self, config):
+    self.num_simulations = config.num_simulations
+    self.discount = config.discount
+    self.pb_c_base = config.pb_c_base
+    self.pb_c_init = config.pb_c_init
 
-        self.min_max_stats = MinMaxStats()
+    self.min_max_stats = MinMaxStats()
 
-    def run(self, root, network):
-        self.min_max_stats.reset()
+  def run(self, root, network):
+    self.min_max_stats.reset()
 
-        for _ in range(self.num_simulations):
-          node = root
-          search_path = [node]
+    search_paths = []
+    for _ in range(self.num_simulations):
+      node = root
 
-          while node.expanded():
-            [self.min_max_stats.update(child.value()) for child in node.children]
+      search_path = [node]
 
-            action, node = self.select_child(node)
+      while node.expanded():
+        action, node = self.select_child(node)
 
-            search_path.append(node)
+        search_path.append(node)
 
-          parent = search_path[-2]
-          last_action = [action]
+      parent = search_path[-2]
+      last_action = [action]
 
-          network_output = network.recurrent_inference(parent.hidden_state, last_action)
-          node.expand(network_output)
+      network_output = network.recurrent_inference(parent.hidden_state, last_action)
+      node.expand(network_output)
 
-          self.backpropagate(search_path, network_output.value.item())
+      self.backpropagate(search_path, network_output.value.item())
 
-    def select_child(self, node):
-        if node.visit_count == 0:
-          action, child = random.choice(list(enumerate(node.children)))
-        else:
-          action = np.argmax([self.ucb_score(node, child) for child in node.children])
-          child = node.children[action]
-        return action, child
+      search_paths.append(search_path)
+    return search_paths
 
-    def ucb_score(self, parent, child):
-        pb_c = math.log((parent.visit_count + self.pb_c_base + 1) / self.pb_c_base) + self.pb_c_init
-        pb_c *= math.sqrt(parent.visit_count) / (child.visit_count + 1)
-        prior_score = pb_c * child.prior
-        value_score = self.min_max_stats.normalize(child.value())
-        return prior_score + value_score
+  def select_child(self, node):
+    if node.visit_count == 0:
+      action = np.random.choice(len(node.children))
+      child = node.children[action]
+    else:
+      action = np.argmax([self.ucb_score(node, child) for child in node.children])
+      child = node.children[action]
+    return action, child
 
-    def backpropagate(self, search_path, value):
-        for idx, node in enumerate(reversed(search_path)):
-          node.value_sum += value
-          node.visit_count += 1
-          self.min_max_stats.update(node.value())
-          value = node.reward + self.discount * value
+  def ucb_score(self, parent, child):
+    pb_c = math.log((parent.visit_count + self.pb_c_base + 1) / self.pb_c_base) + self.pb_c_init
+    pb_c *= math.sqrt(parent.visit_count) / (child.visit_count + 1)
+    prior_score = pb_c * child.prior
+    if child.visit_count > 0:
+      value_score = self.min_max_stats.normalize(child.reward + self.discount * child.value())
+    else:
+      value_score = 0.
+    return prior_score + value_score
+
+  def backpropagate(self, search_path, value):
+    for idx, node in enumerate(reversed(search_path)):
+      node.value_sum += value
+      node.visit_count += 1
+      self.min_max_stats.update(node.reward + self.discount * node.value())
+      value = node.reward + self.discount * value
 

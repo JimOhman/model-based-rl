@@ -32,7 +32,7 @@ class NoopResetEnv(gym.Wrapper):
         return obs
 
     def step(self, act):
-        obs, reward, done, info = self.env.step(action)
+        obs, reward, done, info = self.env.step(act)
         return obs, reward, done, info
 
 
@@ -196,6 +196,7 @@ class FrameStack(gym.Wrapper):
         assert len(self.frames) == self.k
         return LazyFrames(list(self.frames))
 
+
 class MyopicFrameStack(gym.Wrapper):
     def __init__(self, env, config):
         gym.Wrapper.__init__(self, env)
@@ -268,6 +269,27 @@ class MyopicFrameActionStack(gym.Wrapper):
     def _get_ob(self):
         assert len(self.frames) == self.k
         return LazyFrames(list(self.frames))
+
+class NonAtariFrameStack(gym.Wrapper):
+    def __init__(self, env, stack_frames):
+        gym.Wrapper.__init__(self, env)
+        self.k = stack_frames
+        self.frames = deque([], maxlen=self.k)
+
+    def reset(self):
+        obs = self.env.reset()
+        for _ in range(self.k):
+            self.frames.append(obs)
+        return self._get_ob()
+
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+        self.frames.append(obs)
+        return self._get_ob(), reward, done, info
+
+    def _get_ob(self):
+        assert len(self.frames) == self.k
+        return LazyFrames(list(self.frames))
         
 
 class LazyFrames(object):
@@ -320,4 +342,9 @@ def wrap_atari(env, config):
         else:
             env = FrameStack(env, config.stack_frames)
 
+    return env
+
+def wrap_game(env, config):
+    if config.stack_frames > 1:
+        env = NonAtariFrameStack(env, config.stack_frames)
     return env

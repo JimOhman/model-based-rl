@@ -1,4 +1,5 @@
 from collections import namedtuple
+from utils import set_all_seeds
 import numpy as np
 import random
 import ray
@@ -56,32 +57,32 @@ class SumTree(object):
           self.position = (self.position + 1) % self.capacity
 
           if self.num_memories < self.capacity:
-              self.num_memories += 1
+            self.num_memories += 1
 
     def update(self, idx, priority):
         change = priority - self.tree[idx]
         self.tree[idx] = priority
 
         while idx != 0:
-            idx = (idx - 1) // 2
-            self.tree[idx] += change
+          idx = (idx - 1) // 2
+          self.tree[idx] += change
 
     def get_leaf(self, value):
         parent_index = 0
 
         while True:
-            left_child_index = 2 * parent_index + 1
-            right_child_index = left_child_index + 1
+          left_child_index = 2 * parent_index + 1
+          right_child_index = left_child_index + 1
 
-            if left_child_index >= len(self.tree):
-                leaf_index = parent_index
-                break
+          if left_child_index >= len(self.tree):
+            leaf_index = parent_index
+            break
+          else:
+            if value <= self.tree[left_child_index]:
+              parent_index = left_child_index
             else:
-                if value <= self.tree[left_child_index]:
-                    parent_index = left_child_index
-                else:
-                    value -= self.tree[left_child_index]
-                    parent_index = right_child_index
+              value -= self.tree[left_child_index]
+              parent_index = right_child_index
 
         buffer_index = leaf_index - self.capacity + 1
         step, history = self.buffer[buffer_index]
@@ -91,6 +92,7 @@ class SumTree(object):
     @property
     def total_priority(self):
         return self.tree[0]
+
 
 @ray.remote
 class PrioritizedReplay():
@@ -111,6 +113,9 @@ class PrioritizedReplay():
         self.tree = SumTree(capacity=self.window_size)
 
         self.throughput = 0
+
+        np.random.seed(config.seed)
+        random.seed(config.seed+1)
 
     def get_priorities(self, errors):
         return np.power((np.abs(errors) + self.epsilon), self.alpha)
@@ -134,31 +139,33 @@ class PrioritizedReplay():
         steps = []
 
         if self.beta < 1:
-            self.beta = np.min([1., self.beta + self.beta_increment_per_sampling])
+          self.beta = np.min([1., self.beta + self.beta_increment_per_sampling])
 
         priority_segment = self.tree.total_priority / self.batch_size
         for i in range(self.batch_size):
-            s1, s2 = priority_segment * i, priority_segment * (i + 1)
-            value = random.uniform(s1, s2)
+          s1, s2 = priority_segment * i, priority_segment * (i + 1)
+          value = random.uniform(s1, s2)
 
-            idx, priority, step, history = self.tree.get_leaf(value)
+          idx, priority, step, history = self.tree.get_leaf(value)
 
-            priorities.append(priority)
-            idxs.append(idx)
-            steps.append(step)
+          priorities.append(priority)
+          idxs.append(idx)
+          steps.append(step)
 
-            observation = history.observations[step]
+          observation = history.observations[step]
 
-            actions = history.actions[step:step + self.num_unroll_steps]
-            num_actions = len(history.child_visits[0])
-            while len(actions) < self.num_unroll_steps:
-              actions.append(np.random.randint(num_actions))
+          actions = history.actions[step:step + self.num_unroll_steps]
+          num_actions = len(history.child_visits[0])
+          while len(actions) < self.num_unroll_steps:
+            actions.append(np.random.randint(num_actions))
+          # absorbing_policy = [0] * num_actions
+          absorbing_policy = [1/num_actions] * num_actions
 
-            target = self.make_target(history, step, num_actions)
-            
-            batch_observations.append(observation)
-            batch_actions.append(actions)
-            batch_targets.append(target)
+          target = self.make_target(history, step, absorbing_policy)
+          
+          batch_observations.append(observation)
+          batch_actions.append(actions)
+          batch_targets.append(target)
 
         batch = [batch_observations, batch_actions, batch_targets]
 
@@ -168,43 +175,42 @@ class PrioritizedReplay():
 
         return batch, idxs, is_weights
 
-    def make_target(self, history, step, num_actions):
+    def make_target(self, history, step, absorbing_policy):
         done_indexes = history.dones[step:step + self.num_unroll_steps + 1]
 
         end_index = len(history.root_values)
 
         target_rewards, target_values, target_policies = [], [], []
         for current_index in range(step, step + self.num_unroll_steps + 1):
-            bootstrap_index = current_index + self.td_steps
-            if bootstrap_index < end_index:
-              value = history.root_values[bootstrap_index] * self.discount**self.td_steps
-            else:
-              value = 0
+          bootstrap_index = current_index + self.td_steps
+          if bootstrap_index < end_index:
+            value = history.root_values[bootstrap_index] * self.discount**self.td_steps
+          else:
+            value = 0
 
-            for i, reward in enumerate(history.rewards[current_index:bootstrap_index]):
-              value += reward * self.discount**i
+          for i, reward in enumerate(history.rewards[current_index:bootstrap_index]):
+            value += reward * self.discount**i
 
-            if current_index > 0 and current_index <= len(history.rewards):
-                last_reward = history.rewards[current_index - 1]
-            else:
-                last_reward = 0
+          if current_index > 0 and current_index <= len(history.rewards):
+              last_reward = history.rewards[current_index - 1]
+          else:
+              last_reward = 0
 
-            if current_index < end_index:
-              target_policies.append(history.child_visits[current_index])
-              target_rewards.append(last_reward)
-              target_values.append(value)
-            else:
-              dummy_policy = [0] * num_actions
-              target_policies.append(dummy_policy)
-              target_rewards.append(last_reward)
-              target_values.append(0)
-
+          if current_index < end_index:
+            target_policies.append(history.child_visits[current_index])
+            target_rewards.append(last_reward)
+            target_values.append(value)
+          else:
+            target_policies.append(absorbing_policy)
+            target_rewards.append(last_reward)
+            target_values.append(0)
+        
         return target_rewards, target_values, target_policies
 
     def update(self, idxs, errors):
       priorities = self.get_priorities(errors)
       for idx, priority in zip(idxs, priorities):
-          self.tree.update(idx, priority)
+        self.tree.update(idx, priority)
 
     def size(self):
       return self.tree.num_memories

@@ -55,22 +55,23 @@ class FCRepresentation(nn.Module):
 
     def __init__(self, input_dim):
         super(FCRepresentation, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 15, bias=False)
+        self.fc1 = nn.Linear(input_dim, 100)
+        self.out = nn.Linear(100, 50)
 
     def forward(self, x):
         x = torch.tanh(self.fc1(x))
-        return x
+        return torch.tanh(self.out(x))
 
 
 class FCDynamicsState(nn.Module):
 
     def __init__(self, input_dim, action_space):
         super(FCDynamicsState, self).__init__()
-        self.fc1 = nn.Linear(15+action_space, 32, bias=False)
-        self.out = nn.Linear(32, 15)
+        self.fc1 = nn.Linear(50+action_space, 100)
+        self.out = nn.Linear(100, 50)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
+        x = torch.tanh(self.fc1(x))
         return torch.tanh(self.out(x))
 
 
@@ -78,11 +79,11 @@ class FCDynamicsReward(nn.Module):
 
     def __init__(self, input_dim, action_space, reward_support_size):
         super(FCDynamicsReward, self).__init__()
-        self.fc1 = nn.Linear(15+action_space, 32)
-        self.reward = nn.Linear(32, reward_support_size)
+        self.fc1 = nn.Linear(50+action_space, 100)
+        self.reward = nn.Linear(100, reward_support_size)
 
     def forward(self, x):
-        x = torch.tanh(self.fc1(x))
+        x = F.relu(self.fc1(x))
         return self.reward(x)
 
 
@@ -90,11 +91,11 @@ class FCPredictionValue(nn.Module):
 
     def __init__(self, input_dim, value_support_size):
         super(FCPredictionValue, self).__init__()
-        self.fc1 = nn.Linear(15, 32)
-        self.value = nn.Linear(32, value_support_size)
+        self.fc1 = nn.Linear(50, 100)
+        self.value = nn.Linear(100, value_support_size)
 
     def forward(self, x):
-        x = torch.tanh(self.fc1(x))
+        x = F.relu(self.fc1(x))
         return self.value(x)
 
 
@@ -102,11 +103,11 @@ class FCPredictionPolicy(nn.Module):
 
     def __init__(self, input_dim, action_space):
         super(FCPredictionPolicy, self).__init__()
-        self.fc1 = nn.Linear(15, 32)
-        self.policy = nn.Linear(32, action_space)
+        self.fc1 = nn.Linear(50, 100)
+        self.policy = nn.Linear(100, action_space)
 
     def forward(self, x):
-        x = F.leaky_relu(self.fc1(x))
+        x = F.relu(self.fc1(x))
         return self.policy(x)
 
 
@@ -130,6 +131,8 @@ class FCNetwork(BaseNetwork):
         self.inverse_value_transform = config.inverse_value_transform
 
         self.no_support = config.no_support
+
+        self.scale = True if config.scale_state is not None else False
 
     def representation(self, observation):
         hidden_state = self.representation_head(observation)
@@ -156,14 +159,15 @@ class FCNetwork(BaseNetwork):
         batch_size = np.shape(action)[0]
         action = np.array(action)[:, np.newaxis]
         a = torch.tensor(action, device=self.device)
-        one_hot = torch.zeros((batch_size, self.action_space), dtype=torch.float32)
+        one_hot = torch.zeros((batch_size, self.action_space), dtype=torch.float32, device=self.device)
         one_hot.scatter_(1, a, 1.0)
         hidden_state = torch.cat((hidden_state, one_hot), dim=1)
         return hidden_state
 
     def scale_state(self, state):
-        Min = state.min()
-        state = (state - Min) / (state.max() - Min)
+        if self.scale:
+            Min = state.min()
+            state = (state - Min) / (state.max() - Min)
         return state
 
     def load_weights(self, weights):
@@ -352,28 +356,26 @@ class TinyRepresentation(nn.Module):
 
     def __init__(self, input_channels):
         super(TinyRepresentation, self).__init__()
-        self.conv1 = nn.Conv2d(input_channels, 64, kernel_size=3, stride=2, padding=1) # dims 48, 48
+        self.conv1 = nn.Conv2d(input_channels, 32, kernel_size=3, stride=2, padding=1) # dims 48, 48
 
-        self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1) # dims 24, 24
+        self.max_pool1 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1) # dims 24, 24
 
-        self.avg_pool1 = nn.AvgPool2d(kernel_size=3, stride=2, padding=1) # dims 12, 12
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1) # dims 12, 12
 
-        self.block1 = TinyBlock(64)
+        self.max_pool2 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1) # dims 6, 6
 
-        self.avg_pool2 = nn.AvgPool2d(kernel_size=3, stride=2, padding=1) # dims 6, 6
+        self.block2 = TinyBlock(64) # dims 6, 6
 
-        self.block2 = TinyBlock(64)
-
-        self.conv5 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1)
+        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1) # dims 6, 6
 
     def forward(self, x):
-        out = self.conv1(x)
-        out = self.conv2(out)
-        out = self.avg_pool1(out)
-        out = self.block1(out)
-        out = self.avg_pool2(out)
+        out = F.relu(self.conv1(x))
+        out = self.max_pool1(out)
+        out = F.relu(self.conv2(out))
+        out = self.max_pool2(out)
+
         out = self.block2(out)
-        out = F.relu(self.conv5(out))
+        out = torch.tanh(self.conv3(out))
         return out
 
 
@@ -389,8 +391,7 @@ class TinyValue(nn.Module):
         batch_size = x.size(0)
         out = self.block1(x)
         value = F.relu(self.fc_value(out.view(batch_size, -1)))
-        value = self.fc_value_o(value)
-        return value
+        return self.fc_value_o(value)
 
 
 class TinyPolicy(nn.Module):
@@ -404,8 +405,8 @@ class TinyPolicy(nn.Module):
     def forward(self, x):
         batch_size = x.size(0)
         out = self.block1(x)
-        policy = F.relu(self.fc_policy(out.view(batch_size, -1)))
-        policy = self.fc_policy_o(policy)
+        out = F.relu(self.fc_policy(out.view(batch_size, -1)))
+        policy = self.fc_policy_o(out)
         return policy
 
 
@@ -420,8 +421,8 @@ class TinyReward(nn.Module):
     def forward(self, x):
         batch_size = x.size(0)
         out = self.block1(x)
-        reward = F.relu(self.fc1(out.view(batch_size, -1)))
-        reward = self.fc2(reward)
+        out = F.relu(self.fc1(out.view(batch_size, -1)))
+        reward = self.fc2(out)
         return reward
 
 
@@ -430,15 +431,12 @@ class TinyHidden(nn.Module):
     def __init__(self):
         super(TinyHidden, self).__init__()
         self.block1 = TinyBlock(65)
-        self.block2 = TinyBlock(65)
         self.conv1 = nn.Conv2d(65, 64, kernel_size=3, stride=1, padding=1)
 
     def forward(self, x):
         batch_size = x.size(0)
         out = self.block1(x)
-        out = self.block2(out)
-        state = F.relu(self.conv1(out))
-        return state
+        return torch.tanh(self.conv1(out))
 
 
 class TinyNetwork(BaseNetwork):
@@ -448,11 +446,8 @@ class TinyNetwork(BaseNetwork):
         self.device = device
 
         self.action_space = action_space
-        if not config.no_support:
-            value_output_dim = config.value_support_size
-            reward_output_dim = config.reward_support_size
-        else:
-            value_output_dim, reward_output_dim = 1, 1
+        value_output_dim = config.value_support_size if not config.no_support else 1
+        reward_output_dim = config.reward_support_size if not config.no_support else 1
 
         self.representation_head = TinyRepresentation(input_channels)
         self.value_head = TinyValue(value_output_dim)

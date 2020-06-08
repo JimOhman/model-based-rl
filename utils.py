@@ -1,10 +1,11 @@
-from atari_wrappers import wrap_atari
+from atari_wrappers import wrap_atari, wrap_game
 from torch.optim.lr_scheduler import ExponentialLR
 from torch.optim import RMSprop, Adam, SGD
 from torch.nn import MSELoss, LogSoftmax, SmoothL1Loss
 from networks import MuZeroNetwork, FCNetwork, TinyNetwork
 from torchsummary import summary
 import numpy as np
+import random
 import torch
 import gym
 
@@ -18,10 +19,12 @@ def print_network_summary(config):
     summary(network.transition_head, (128+1, 6, 6))
 
 def get_environment(config):
-    env = gym.make(config.environment)
+    environment = gym.make(config.environment)
     if config.wrap_atari:
-      env = wrap_atari(env, config)
-    return env
+      environment = wrap_atari(environment, config)
+    else:
+      environment = wrap_game(environment, config)
+    return environment
 
 def get_network(config, device=None):
     if device is None:
@@ -46,10 +49,11 @@ def get_network(config, device=None):
         input_channels *= 2
       network = TinierNetwork(input_channels, action_space, device, config)
     elif config.architecture == 'FCNetwork':
-      input_dim = np.shape(env.observation_space)[0]
+      input_dim = config.stack_frames * np.shape(env.observation_space)[0]
       network = FCNetwork(input_dim, action_space, device, config)
     else:
       raise NotImplementedError
+
     return network
 
 def get_loss_functions(config):
@@ -111,5 +115,12 @@ def get_lr_scheduler(config, optimizer):
       raise NotImplementedError
     return lr_scheduler
 
-
-
+def set_all_seeds(seed=None):
+  if seed is None:
+    seed = random.randint(0, 1000)
+  torch.manual_seed(seed)
+  torch.cuda.manual_seed_all(seed+1)
+  random.seed(seed+2)
+  np.random.seed(seed+3)
+  torch.backends.cudnn.deterministic = True
+  torch.backends.cudnn.benchmark = False

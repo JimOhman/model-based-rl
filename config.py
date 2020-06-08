@@ -38,6 +38,22 @@ class Config(object):
   def reward_phi(self, x):
       return self.scalar_to_support(x, self.reward_support_min, self.reward_support_max, self.reward_support_size)
 
+  def visit_softmax_temperature(self, training_step):
+      step1, step2 = self.visit_softmax_steps
+      temp1, temp2, temp3 = self.visit_softmax_temperatures
+      if training_step < step1:
+        return temp1
+      elif training_step < step2:
+        return temp2
+      else:
+        return temp3
+
+  def to_torch(self, x, device, scale=False):
+    x = np.float32(x)
+    if scale and self.scale_state is not None:
+      x = (x - self.scale_state[0]) / (self.scale_state[1] - self.scale_state[0])
+    return torch.from_numpy(x).to(device)
+
   @staticmethod
   def scalar_transform(x):
       output = torch.sign(x) * (torch.sqrt(torch.abs(x) + 1) - 1) + 0.001 * x
@@ -57,27 +73,9 @@ class Config(object):
       support.scatter_(2, x_low_idx.long().unsqueeze(-1), p_low.unsqueeze(-1))
       return support
 
-  def visit_softmax_temperature(self, training_step):
-      step1, step2 = self.visit_softmax_steps
-      temp1, temp2, temp3 = self.visit_softmax_temperatures
-      if training_step < step1:
-        return temp1
-      elif training_step < step2:
-        return temp2
-      else:
-        return temp3
-
   @staticmethod
   def to_numpy(x):
     return x.detach().cpu().numpy()
-
-  @staticmethod
-  def to_torch(x, device, scale=None):
-    scale = None
-    if scale is not None:
-      return torch.from_numpy(np.float32(x) / scale).to(device)
-    else:
-      return torch.from_numpy(np.float32(x)).to(device)
 
   @staticmethod
   def select_action(node, temperature=0):
@@ -103,6 +101,7 @@ def make_config():
   network.add_argument('--value_support', nargs='+', type=int, default=[-25, 25])
   network.add_argument('--reward_support', nargs='+', type=int, default=[-5, 5])
   network.add_argument('--no_support', action='store_true')
+  network.add_argument('--seed', nargs='+', type=int, default=[None])
 
   ## Myopic
   myopic = parser.add_argument_group('myopic')
@@ -115,25 +114,28 @@ def make_config():
   environment.add_argument('--environment', type=str, default='BreakoutNoFrameskip-v4') # BreakoutNoFrameskip-v4 SpaceInvadersNoFrameskip-v4
 
   # Environment Modifications
-  atari = parser.add_argument_group('atari environment')
+  environment_modifications = parser.add_argument_group('general environment modifications')
+  environment_modifications.add_argument('--scale_state', nargs='+', type=int, default=None)
+  environment_modifications.add_argument('--clip_rewards', action='store_true')
+  environment_modifications.add_argument('--stack_frames', type=int, default=1)
+
+  atari = parser.add_argument_group('atari environment modifications')
   atari.add_argument('--wrap_atari', action='store_true')
-  atari.add_argument('--clip_rewards', action='store_true')
   atari.add_argument('--episode_life', action='store_true')
   atari.add_argument('--stack_actions', action='store_true')
-  atari.add_argument('--stack_frames', type=int, default=4)
   atari.add_argument('--frame_size', nargs='+', type=int, default=[96, 96])
   atari.add_argument('--noop_max', type=int, default=30)
   atari.add_argument('--frame_skip', type=int, default=4)
 
   ### Self-Play
   self_play = parser.add_argument_group('self play')
-  self_play.add_argument('--num_actors', type=int, default=7)
+  self_play.add_argument('--num_actors', nargs='+', type=int, default=[7])
   self_play.add_argument('--max_steps', type=int, default=27000)
-  self_play.add_argument('--num_simulations', type=int, default=30)
+  self_play.add_argument('--num_simulations', nargs='+', type=int, default=[30])
   self_play.add_argument('--max_sequence_length', type=int, default=200)
-  self_play.add_argument('--discount', type=float, default=0.997)
   self_play.add_argument('--visit_softmax_temperatures', nargs='+', type=float, default=[1.0, 0.5, 0.25])
   self_play.add_argument('--visit_softmax_steps', nargs='+', type=int, default=[50e3, 100e3])
+  self_play.add_argument('--fixed_temperatures', nargs='+', type=float, default=[])
 
   # Root prior exploration noise.
   exploration = parser.add_argument_group('exploration')
@@ -147,7 +149,7 @@ def make_config():
 
   ### Prioritized Replay Buffer
   per = parser.add_argument_group('prioritized experience replay')
-  per.add_argument('--window_size', type=int, default=50000)
+  per.add_argument('--window_size', nargs='+', type=int, default=[50000])
   per.add_argument('--epsilon', type=float, default=0.01)
   per.add_argument('--alpha', type=float, default=1.)
   per.add_argument('--beta', type=float, default=1.)
@@ -158,23 +160,25 @@ def make_config():
   training.add_argument('--training_steps', type=int, default=1000000)
   training.add_argument('--policy_loss', type=str, default='CrossEntropyLoss')
   training.add_argument('--scalar_loss', type=str, default='MSE')
-  training.add_argument('--num_unroll_steps', type=int, default=5)
-  training.add_argument('--checkpoint_frequency', type=int, default=1000)
-  training.add_argument('--td_steps', type=int, default=10)
-  training.add_argument('--batch_size', type=int, default=32)
+  training.add_argument('--num_unroll_steps', nargs='+', type=int, default=[5])
+  training.add_argument('--checkpoint_frequency', type=int, default=100)
+  training.add_argument('--td_steps', nargs='+', type=int, default=10)
+  training.add_argument('--batch_size', nargs='+', type=int, default=[64])
   training.add_argument('--batches_per_fetch', type=int, default=15)
-  training.add_argument('--stored_before_train', type=int, default=1000)
+  training.add_argument('--stored_before_train', type=int, default=5000)
   training.add_argument('--clip_grad', type=int, default=0)
   training.add_argument('--no_target_transform', action='store_true')
+  training.add_argument('--sampling_ratio', type=float, default=0.)
+  training.add_argument('--discount', nargs='+', type=float, default=[0.997])
 
   # Optimizer
-  training.add_argument('--optimizer', type=str, default='SGD')
+  training.add_argument('--optimizer', type=str, default='Adam')
   training.add_argument('--momentum', type=float, default=0.9)
   training.add_argument('--weight_decay', type=float, default=1e-4)
 
   # Learning rate scheduler
   training.add_argument('--lr_scheduler', type=str, default='')
-  training.add_argument('--lr_init', type=float, default=0.05)
+  training.add_argument('--lr_init', nargs='+', type=float, default=[0.0005])
   training.add_argument('--lr_decay_rate', type=float, default=0.1)
   training.add_argument('--lr_decay_steps', type=int, default=350000)
 
@@ -185,16 +189,29 @@ def make_config():
   load_and_save.add_argument('--override_loaded_config', action='store_true')
 
   ### Evalutation
-  evaluation = parser.add_argument_group('evaluation during training')
-  evaluation.add_argument('--evaluation_frequency', type=int, default=0)
+  evaluation = parser.add_argument_group('evaluation')
   evaluation.add_argument('--games_per_evaluation', type=int, default=1)
+  evaluation.add_argument('--eval_temperatures', nargs='+', type=float, default=[0])
+  evaluation.add_argument('--only_prior', nargs='+', type=int, default=[0])
+  evaluation.add_argument('--only_value', nargs='+', type=int, default=[0])
+  evaluation.add_argument('--use_exploration_noise', nargs='+', type=int, default=[0])
+  evaluation.add_argument('--saves_dir', nargs='+', type=str, default=[''])
+  evaluation.add_argument('--evaluate_nets', nargs='+', type=str, default=[''])
+  evaluation.add_argument('--plot_summary', action='store_true')
+  evaluation.add_argument('--include_bounds', action='store_true')
+  evaluation.add_argument('--include_policy', action='store_true')
+  evaluation.add_argument('--detailed_eval_tag', action='store_true')
+  evaluation.add_argument('--smooth', type=int, default=0)
+  evaluation.add_argument('--plot_aggregate', action='store_true')
+  evaluation.add_argument('--apply_mcts_steps', nargs='+', type=int, default=[1])
 
   ### Logging
   logging = parser.add_argument_group('logging')
-  logging.add_argument('--run_tag', type=str, default='')
+  logging.add_argument('--run_tag', type=str, default=None)
+  logging.add_argument('--group_tag', type=str, default='default')
   logging.add_argument('--log', nargs='+', type=str, default='')
   logging.add_argument('--actor_log_frequency', type=int, default=1)
-  logging.add_argument('--learner_log_frequency', type=int, default=1)
+  logging.add_argument('--learner_log_frequency', type=int, default=100)
 
   ### Debugging
   debug = parser.add_argument_group('debugging')
@@ -202,7 +219,7 @@ def make_config():
   debug.add_argument('--render', nargs='+', type=str, default='')
   debug.add_argument('--verbose', nargs='+', type=str, default='')
   debug.add_argument('--print_network_summary', action='store_true')
-  debug.add_argument('--input_shapes', nargs='+', type=str, default='')
+  debug.add_argument('--save_mcts_to_path', type=str, default='')
 
   args = vars(parser.parse_args())
 
