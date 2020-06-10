@@ -109,72 +109,58 @@ class SummaryTools(object):
       quantiles = {'0.5': center, '0.75': upper, '0.25': lower}
       return quantiles
 
-  def get_axes(self):
-    ax1 = plt.subplot2grid((6, 1), (0, 0))
-    ax2 = plt.subplot2grid((6, 1), (1, 0))
-    ax3 = plt.subplot2grid((6, 1), (2, 0))
-    ax4 = plt.subplot2grid((6, 1), (3, 0))
-    ax5 = plt.subplot2grid((6, 1), (4, 0))
-    ax6 = plt.subplot2grid((6, 1), (5, 0))
-    ax1.set_ylabel('Return', color='white', fontsize=15)
-    ax1.tick_params(colors='white')
-    ax2.set_ylabel('Predicted Return', color='white', fontsize=15)
-    ax2.tick_params(colors='white')
-    ax3.set_ylabel('Predicted Value', color='white', fontsize=15)
-    ax3.tick_params(colors='white')
-    ax4.set_ylabel('MCTS Value', color='white', fontsize=15)
-    ax4.tick_params(colors='white')
-    ax5.set_ylabel('Search Depth', color='white', fontsize=15)
-    ax5.tick_params(colors='white')
-    ax6.set_ylabel('Policy', color='white', fontsize=15)
-    ax6.tick_params(colors='white')
-    return ax1, ax2, ax3, ax4, ax5, ax6
+  def get_axes(self, config):
+    labels = ['Return', 'Predicted Return', 'Value', 'Predicted Value', 'MCTS Value', 'Search Depth']
+    if config.include_policy:
+      labels.append('Policy')
+    n = len(labels)
+    axes = []
+    for i, label in enumerate(labels):
+      ax = plt.subplot2grid((n, 1), (i, 0))
+      ax.set_ylabel(label, color='white', fontsize=15)
+      ax.tick_params(colors='white')
+      ax.grid(alpha=0.3)
+      axes.append(ax)
+    axes[-1].set_xlabel('Steps', color='white', fontsize=15)
+    return axes
 
   def plot_summary(self, games, config, axes=None):
-    ax1, ax2, ax3, ax4, ax5, ax6 = self.get_axes() if axes is None else axes
+    axes = self.get_axes(config) if axes is None else axes
 
     rewards = [game.history.rewards for game in games]
     pred_rewards = [game.pred_rewards for game in games]
+
+    returns = [np.cumsum(rews) for rews in rewards]
+    pred_returns = [np.cumsum(rews) for rews in pred_rewards]
+
+    discounts = [self.config.discount**n for n in range(max(map(len, rewards)))]
+    values = []
+    for rews in rewards:
+      steps = len(rews)
+      values.append([np.dot(rews[i:], discounts[:steps-i]) for i in range(steps)])
     pred_values = [game.pred_values for game in games]
-    root_values = [game.history.root_values for game in games]
+    mcts_values = [game.history.root_values for game in games]
+
     search_depths = [game.search_depths for game in games]
 
-    return_quantiles = self.get_quantiles([np.cumsum(rews) for rews in rewards], config.smooth)
-    pred_return_quantiles = self.get_quantiles([np.cumsum(rews) for rews in pred_rewards], config.smooth)
-    pred_value_quantiles = self.get_quantiles(pred_values, config.smooth)
-    root_value_quantiles = self.get_quantiles(root_values, config.smooth)
-    search_depth_quantiles = self.get_quantiles(search_depths, config.smooth)
+    data = [returns, pred_returns, values, pred_values, mcts_values, search_depths]
 
-    ax1.plot(return_quantiles['0.5'], linewidth=2, label=self.config.eval_tag)
-    ax2.plot(pred_return_quantiles['0.5'], linewidth=2, label=self.config.eval_tag)
-    ax3.plot(pred_value_quantiles['0.5'], linewidth=2, label=self.config.eval_tag)
-    ax4.plot(root_value_quantiles['0.5'], linewidth=2, label=self.config.eval_tag)
-    ax5.plot(search_depth_quantiles['0.5'], linewidth=2, label=self.config.eval_tag)
-
-    if config.include_bounds:
-      ax1.fill_between(range(len(return_quantiles['0.5'])), y1=return_quantiles['0.25'], y2=return_quantiles['0.75'], alpha=0.4)
-      ax2.fill_between(range(len(pred_return_quantiles['0.5'])), y1=pred_return_quantiles['0.25'], y2=pred_return_quantiles['0.75'], alpha=0.4)
-      ax3.fill_between(range(len(pred_value_quantiles['0.5'])), y1=pred_value_quantiles['0.25'], y2=pred_value_quantiles['0.75'], alpha=0.4)
-      ax4.fill_between(range(len(root_value_quantiles['0.5'])), y1=root_value_quantiles['0.25'], y2=root_value_quantiles['0.75'], alpha=0.4)
-      ax5.fill_between(range(len(search_depth_quantiles['0.5'])), y1=search_depth_quantiles['0.25'], y2=search_depth_quantiles['0.75'], alpha=0.4)
+    data_quantiles = [[self.config.eval_tag, self.get_quantiles(d, config.smooth)] for d in data]
 
     if config.include_policy:
       policy = list(zip(*[zip(*game.history.child_visits) for game in games]))
-      policy_quantiles = []
-      for action in policy:
-        policy_quantiles.append(self.get_quantiles(action, config.smooth))
-      for i, action_quantiles in enumerate(policy_quantiles):
+      for i, action in enumerate(policy):
         label = '{} - action: {}'.format(self.config.eval_tag, i)
-        ax6.plot(action_quantiles['0.5'], linewidth=2, label=label)
-        if config.include_bounds:
-          ax6.fill_between(steps, y1=action_quantiles['0.25'], y2=action_quantiles['0.75'], alpha=0.4)
-      ax6.set_xlabel('Steps', color='white', fontsize=15)
-    else:
-      ax6.set_visible(False)
-      ax5.set_xlabel('Steps', color='white', fontsize=15)
+        data_quantiles.append([label, self.get_quantiles(action, config.smooth)])
+      axes.extend([axes[-1]] * len(policy))
 
-    return ax1, ax2, ax3, ax4, ax5, ax6
+    for ax, [label, quantiles] in zip(axes, data_quantiles):
+      ax.plot(quantiles['0.5'], linewidth=2, label=label)
+      if config.include_bounds:
+        ax.fill_between(range(len(quantiles['0.5'])), y1=quantiles['0.25'], y2=quantiles['0.75'], alpha=0.4)
+      ax.legend(framealpha=0.2)
 
+    return axes
 
 class Evaluator(SummaryTools):
 
@@ -182,8 +168,6 @@ class Evaluator(SummaryTools):
         self.config = state['config']
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        self.environment = get_environment(self.config)
 
         self.network = get_network(self.config, self.device)
         self.network.load_state_dict(state['weights'])
@@ -196,8 +180,8 @@ class Evaluator(SummaryTools):
         else:
           self.render = False
 
-    def play_game(self, device):
-      game = self.config.new_game(self.environment)
+    def play_game(self, environment, device):
+      game = self.config.new_game(environment)
       game.pred_values = []
       game.pred_rewards = []
       game.search_depths = []
@@ -263,10 +247,10 @@ class Evaluator(SummaryTools):
 
           if self.render:
             try:
-              img = self.environment.obs_buffer.max(axis=0)
+              img = environment.obs_buffer.max(axis=0)
               self.viewer.imshow(img)
             except:
-              self.environment.render()
+              environment.render()
 
           if game.terminal or game.step > self.config.max_steps:
             break
@@ -368,7 +352,7 @@ def get_states(config):
   states = []
   for idx, saves_dir in enumerate(config.saves_dir):
     for net in config.evaluate_nets:
-      meta_state = torch.load(saves_dir + net)
+      meta_state = torch.load(saves_dir + net, map_location=torch.device('cpu'))
       for temperature in config.eval_temperatures:
         for num_simulations in config.num_simulations:
           for only_prior in config.only_prior:
@@ -392,14 +376,16 @@ def get_states(config):
 
 @ray.remote
 def run(evaluator, seed=None):
+    environment = get_environment(evaluator.config)
+
     if seed is None:
       seed = np.random.randint(0, 1000)
     set_all_seeds(seed)
-    evaluator.environment.seed(seed)
+    environment.seed(seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     with torch.no_grad():
-        game = evaluator.play_game(device)
+        game = evaluator.play_game(environment, device)
 
     game.history._replace(observations = [])
 
@@ -439,11 +425,9 @@ if __name__ == '__main__':
 
       if config.plot_summary:
         axes = evaluator.plot_summary(games, config, axes)
-      
+
     if config.plot_summary:
-        [ax.legend(framealpha=0.2) for ax in axes]
-        [ax.grid(alpha=0.3) for ax in axes]
-        plt.show()
+      plt.show()
 
     if config.plot_aggregate:
       plot_aggregate(data, config)
