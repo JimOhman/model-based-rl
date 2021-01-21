@@ -130,7 +130,7 @@ class Learner(Logger):
 
     target_rewards, target_values, target_policies = zip(*targets)
 
-    observations = self.config.to_torch(observations, self.device, scale=True)
+    observations = self.config.to_torch(observations, self.device)
 
     target_policies = self.config.to_torch(target_policies, self.device)
     target_values = self.config.to_torch(target_values, self.device)

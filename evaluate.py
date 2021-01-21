@@ -87,13 +87,13 @@ class SummaryTools(object):
     search_depths = [np.mean(game.search_depths) for game in games]
     average_search_depth, std_search_depth = np.round(np.mean(search_depths), 1), np.round(np.std(search_depths), 1)
 
-    print("\n\033[92m[Evaluation of [{}] finished]\033[0m".format(self.config.eval_tag))
+    print("\n\033[92mEvaluation finished! - label: ({})\033[0m".format(self.config.label))
     print("   Average length: {}({})".format(average_length, std_lengths))
     print("   Average return: {}({})".format(average_return, std_return))
     print("   Average predicted return: {}({})".format(average_pred_return, std_pred_return))
     print("   Average predicted value: {}({})".format(average_pred_value, std_pred_value))
     print("   Average mcts value: {}({})".format(average_root_value, std_root_value))
-    print("   Average search depth: {}({})".format(average_search_depth, std_search_depth))
+    print("   Average search depth: {}({})\n".format(average_search_depth, std_search_depth))
 
   def get_quantiles(self, values, smooth=0):
       max_len = len(max(values, key=len))
@@ -109,18 +109,20 @@ class SummaryTools(object):
       return quantiles
 
   def get_axes(self, config):
-    labels = ['Return', 'Predicted Return', 'Value', 'Predicted Value', 'MCTS Value', 'Search Depth']
+    labels = ['Return', 'Pred Return', 'Value', 
+              'Pred Value', 'MCTS Value', 'Search Depth']
     if config.include_policy:
       labels.append('Policy')
-    n = len(labels)
+    n_subplots = len(labels)
     axes = []
     for i, label in enumerate(labels):
-      ax = plt.subplot2grid((n, 1), (i, 0))
-      ax.set_ylabel(label, color='white', fontsize=15)
-      ax.tick_params(colors='white')
+      ax = plt.subplot2grid((n_subplots, 1), (i, 0))
+      ax.set_ylabel(label, color='white', fontsize=13)
+      ax.tick_params(colors='white', labelsize=9)
       ax.grid(alpha=0.3)
       axes.append(ax)
-    axes[-1].set_xlabel('Steps', color='white', fontsize=15)
+    axes[-1].set_xlabel('Steps', color='white', fontsize=13)
+    plt.subplots_adjust(hspace=0.4)
     return axes
 
   def plot_summary(self, games, config, axes=None):
@@ -139,17 +141,15 @@ class SummaryTools(object):
       values.append([np.dot(rews[i:], discounts[:steps-i]) for i in range(steps)])
     pred_values = [game.pred_values for game in games]
     mcts_values = [game.history.root_values for game in games]
-
     search_depths = [game.search_depths for game in games]
 
     data = [returns, pred_returns, values, pred_values, mcts_values, search_depths]
-
-    data_quantiles = [[self.config.eval_tag, self.get_quantiles(d, config.smooth)] for d in data]
+    data_quantiles = [[self.config.label, self.get_quantiles(d, config.smooth)] for d in data]
 
     if config.include_policy:
       policy = list(zip(*[zip(*game.history.child_visits) for game in games]))
       for i, action in enumerate(policy):
-        label = '{} - action: {}'.format(self.config.eval_tag, i)
+        label = '{} - action: {}'.format(self.config.label, i)
         data_quantiles.append([label, self.get_quantiles(action, config.smooth)])
       axes.extend([axes[-1]] * len(policy))
 
@@ -157,8 +157,7 @@ class SummaryTools(object):
       ax.plot(quantiles['0.5'], linewidth=2, label=label)
       if config.include_bounds:
         ax.fill_between(range(len(quantiles['0.5'])), y1=quantiles['0.25'], y2=quantiles['0.75'], alpha=0.4)
-      ax.legend(framealpha=0.2)
-
+      ax.legend(framealpha=0.2, fontsize=8)
     return axes
 
 class Evaluator(SummaryTools):
@@ -185,7 +184,7 @@ class Evaluator(SummaryTools):
       while not game.terminal and game.step < self.config.max_steps:
         root = Node(0)
 
-        current_observation = self.config.to_torch(game.get_observation(-1), device, scale=True).unsqueeze(0)
+        current_observation = self.config.to_torch(game.get_observation(-1), device).unsqueeze(0)
         initial_inference = self.network.initial_inference(current_observation)
 
         root.expand(network_output=initial_inference)
@@ -252,38 +251,35 @@ class Evaluator(SummaryTools):
           if game.terminal or game.step > self.config.max_steps:
             break
 
-      msg = "\n\033[92m[Game done]\033[0m --> "
-      msg += "length: {}, return: {}, pred return: {}, pred value: {}, mcts value: {}\n"
+      msg = "\033[92m[Game done]\033[0m --> "
+      msg += "length: {}, return: {}, pred return: {}, pred value: {}, mcts value: {}"
       print(msg.format(game.step, np.round(game.sum_rewards, 1),
                        np.round(np.sum(game.pred_rewards), 1),
                        np.round(np.mean(game.pred_values), 1),
                        np.round(np.mean(game.history.root_values), 1)))
       return game
 
-def get_eval_tag(state, config, idx):
-    if config.detailed_eval_tag:
-      tag = 'path: {}'.format(idx)
-      tag += ', net: {}'.format(state['step'])
-
+def get_label(state, config, idx):
+    if config.detailed_label:
+      label = 'path:{}'.format(idx)
+      label += ', net:{}'.format(state['step'])
       if state['config'].only_value:
-        tag += ', only value'
+        label += ', only value'
       elif state['config'].only_prior:
-        tag += ', only prior'
+        label += ', only prior'
       else:
-        tag += ', sims: {}'.format(state['config'].num_simulations)
-        tag += ', mcts-steps: {}'.format(state['config'].apply_mcts_steps)
+        label += ', sims:{}'.format(state['config'].num_simulations)
+        label += ', mcts-steps:{}'.format(state['config'].apply_mcts_steps)
         if state['config'].temperature:
-          tag += ', temp: {}'.format(state['config'].temperature)
+          label += ', temp:{}'.format(state['config'].temperature)
         if state['config'].use_exploration_noise:
-          tag += ', with noise'.format(state['config'].use_exploration_noise)
-
+          label += ', with noise'.format(state['config'].use_exploration_noise)
     else:
-      tag = '{}'.format(state['step'])
-    return tag
+      label = '{}'.format(state['step'])
+    return label
 
 def get_states(config):
   state_paths = [(saves_dir + net) for saves_dir in config.saves_dir for net in config.evaluate_nets]
-
   states = []
   for idx, saves_dir in enumerate(config.saves_dir):
     for net in config.evaluate_nets:
@@ -303,18 +299,15 @@ def get_states(config):
                   state['config'].only_prior = only_prior
                   state['config'].use_exploration_noise = use_exploration_noise
                   state['config'].apply_mcts_steps = apply_mcts_steps
-                  state['config'].eval_tag = get_eval_tag(state, config, idx)
+                  state['config'].label = get_label(state, config, idx)
                   state['config'].render = config.render
                   state['config'].save_mcts_to_path = config.save_mcts_to_path
                   states.append(state)
   return states
 
-@ray.remote
 def run(evaluator, seed=None):
     environment = get_environment(evaluator.config)
-
     if seed is not None:
-      set_all_seeds(seed)
       environment.seed(seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -325,6 +318,12 @@ def run(evaluator, seed=None):
     game.environment = None
     return game
 
+@ray.remote
+def run_parallel(evaluator, seed=None):
+    game = run(evaluator, seed)
+    return game
+
+
 if __name__ == '__main__':
     from config import make_config
     import pyglet
@@ -334,9 +333,10 @@ if __name__ == '__main__':
     import os
     os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
-    ray.init()
-
     config = make_config()
+
+    if config.parallel:
+      ray.init()
 
     states = get_states(config)
 
@@ -344,19 +344,21 @@ if __name__ == '__main__':
     for state in states:
       evaluators.append(Evaluator(state))
 
-    print("\033[92mStarting a {} episode evaluation of {} configurations\033[0m...".format(config.games_per_evaluation, len(states)))
+    print("\n\033[92mStarting a {} episode evaluation of {} configurations\033[0m...".format(config.games_per_evaluation, len(states)))
     
     if config.plot_summary:
       axes = None
 
     base_seed = config.seed[0] if config.seed[0] is not None else 0
+    seeds = range(base_seed, config.games_per_evaluation + base_seed)
     
-    data = {}
     for evaluator in evaluators:
-      print("\n\033[92mEvaluating [{}]\033[0m...".format(evaluator.config.eval_tag))
+      print("\n\033[92mEvaluating... - label: ({})\033[0m".format(evaluator.config.label))
 
-      games = ray.get([run.remote(evaluator, (base_seed + seed)) for seed in range(1, config.games_per_evaluation + 1)])
-      data[evaluator.config.eval_tag] = games
+      if config.parallel:
+        games = ray.get([run_parallel.remote(evaluator, seed) for seed in seeds])
+      else:
+        games = [run(evaluator, seed) for seed in seeds]
 
       evaluator.print_summary(games)
 
@@ -364,9 +366,6 @@ if __name__ == '__main__':
         axes = evaluator.plot_summary(games, config, axes)
 
     if config.plot_summary:
-      plt.tight_layout()
-      plt.show()
-
-    if config.plot_aggregate:
-      plot_aggregate(data, config)
+      wm = plt.get_current_fig_manager()
+      wm.window.state('zoomed')
       plt.show()

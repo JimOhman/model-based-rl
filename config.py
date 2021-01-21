@@ -48,9 +48,9 @@ class Config(object):
       else:
         return temp3
 
-  def to_torch(self, x, device, scale=False):
+  def to_torch(self, x, device):
     x = np.float32(x)
-    if scale and self.scale_state is not None:
+    if self.scale_state is not None:
       x = (x - self.scale_state[0]) / (self.scale_state[1] - self.scale_state[0])
     return torch.from_numpy(x).to(device)
 
@@ -200,10 +200,10 @@ def make_config():
   evaluation.add_argument('--plot_summary', action='store_true')
   evaluation.add_argument('--include_bounds', action='store_true')
   evaluation.add_argument('--include_policy', action='store_true')
-  evaluation.add_argument('--detailed_eval_tag', action='store_true')
+  evaluation.add_argument('--detailed_label', action='store_true')
   evaluation.add_argument('--smooth', type=int, default=0)
-  evaluation.add_argument('--plot_aggregate', action='store_true')
   evaluation.add_argument('--apply_mcts_steps', nargs='+', type=int, default=[1])
+  evaluation.add_argument('--parallel', action='store_true')
 
   ### Logging
   logging = parser.add_argument_group('logging')

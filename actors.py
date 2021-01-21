@@ -99,7 +99,7 @@ class Actor(Logger):
     while not game.terminal and game.step < self.config.max_steps:
       root = Node(0)
 
-      current_observation = self.config.to_torch(game.get_observation(-1), self.device, scale=True).unsqueeze(0)
+      current_observation = self.config.to_torch(game.get_observation(-1), self.device).unsqueeze(0)
       initial_inference = self.network.initial_inference(current_observation)
 
       root.expand(network_output=initial_inference)
