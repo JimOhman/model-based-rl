@@ -1,7 +1,6 @@
 from utils import get_network, get_optimizer, get_lr_scheduler, get_loss_functions, set_all_seeds
 from logger import Logger
 from copy import deepcopy
-import numpy as np
 import datetime
 import pytz
 import torch
@@ -30,7 +29,7 @@ class Learner(Logger):
     self.scalar_loss_fn, self.policy_loss_fn = get_loss_functions(config)
 
     self.training_step = 0
-    self.losses_to_log = {'reward': 0, 'value': 0, 'policy': 0}
+    self.losses_to_log = {'reward': 0., 'value': 0., 'policy': 0.}
 
     self.verbose = True if 'learner' in self.config.verbose else False
     self.log = True if 'learner' in self.config.log else False

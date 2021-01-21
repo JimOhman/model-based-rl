@@ -1,7 +1,6 @@
 from torch.utils.tensorboard import SummaryWriter
 import torch
 import pytz
-import datetime
 import json
 import os
 

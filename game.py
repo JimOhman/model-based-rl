@@ -18,7 +18,6 @@ class Game(object):
     self.episode_life = config.episode_life
     self.clip_rewards = config.clip_rewards
     self.environment = environment
-    self.render = True if 'actors' in config.render else False
 
     self.history = History([], [], [], [], [], [], [])
 
@@ -47,9 +46,6 @@ class Game(object):
       self.history.observations.append(observation)
     else:
       self.history.observations.append(observation)
-
-    if self.render:
-      self.environment.render()
 
   def store_search_statistics(self, root):
     sum_visits = sum(child.visit_count for child in root.children)

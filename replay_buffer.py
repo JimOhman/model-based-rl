@@ -1,42 +1,6 @@
-from collections import namedtuple
-from utils import set_all_seeds
 import numpy as np
 import random
 import ray
-
-
-@ray.remote
-class ReplayBuffer(object):
-
-    def __init__(self, config):
-        self.window_size = config.window_size
-        self.batch_size = config.batch_size
-        self.buffer = []
-
-    def save_game(self, game):
-        if len(self.buffer) > self.window_size:
-          self.buffer.pop(0)
-        self.buffer.append(game)
-
-    def sample_batch(self, num_unroll_steps, td_steps):
-        games = [self.sample_game() for _ in range(self.batch_size)]
-        game_pos = [(g, self.sample_position(g)) for g in games]
-        batch = []
-        for g, i in game_pos:
-          image = g.make_image(i)
-          actions = g.action_history[i:i + num_unroll_steps]
-          target = g.make_target(i, num_unroll_steps, td_steps)
-          batch.append((image, actions, target))
-        return batch
-
-    def sample_game(self):
-        return random.choice(self.buffer, 1)
-
-    def sample_position(self, game):
-        return random.choice(len(game.action_history), 1)
-
-    def size(self):
-        return len(self.buffer)
 
 
 class SumTree(object):
@@ -114,8 +78,9 @@ class PrioritizedReplay():
 
         self.throughput = 0
 
-        np.random.seed(config.seed)
-        random.seed(config.seed+1)
+        if config.seed is not None:
+          np.random.seed(config.seed)
+          random.seed(config.seed+1)
 
     def get_priorities(self, errors):
         return np.power((np.abs(errors) + self.epsilon), self.alpha)
@@ -126,7 +91,6 @@ class PrioritizedReplay():
         else:
           priorities = self.get_priorities(history.errors)
         self.tree.add(priorities, history)
-
         self.throughput += len(priorities)
 
     def sample_batch(self):
@@ -158,7 +122,6 @@ class PrioritizedReplay():
           num_actions = len(history.child_visits[0])
           while len(actions) < self.num_unroll_steps:
             actions.append(np.random.randint(num_actions))
-          # absorbing_policy = [0] * num_actions
           absorbing_policy = [1/num_actions] * num_actions
 
           target = self.make_target(history, step, absorbing_policy)

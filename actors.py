@@ -2,13 +2,13 @@ from utils import get_network, get_environment, set_all_seeds
 from mcts import MCTS, Node
 from logger import Logger
 from copy import deepcopy
-import numpy as np
 import datetime
 import pytz
 import time
 import torch
 import ray
 import random
+
 
 @ray.remote(num_cpus=1)
 class Actor(Logger):
@@ -125,7 +125,6 @@ class Actor(Logger):
           collect_from = game.previous_collect_to
         history = game.get_history_sequence(collect_from)
         self.replay_buffer.save_history.remote(history, ignore=ignore)
-
     return game
 
   def launch(self):

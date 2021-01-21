@@ -6,7 +6,6 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use("TkAgg")
 plt.style.use('dark_background')
-from logger import Logger
 import numpy as np
 import torch
 import ray
@@ -49,7 +48,7 @@ class ImageViewer(object):
       self.window.clear()
       self.window.switch_to()
       self.window.dispatch_events()
-      texture.blit(0, 0) # draw
+      texture.blit(0, 0)
       self.window.flip()
 
   def close(self):
@@ -168,20 +167,18 @@ class Evaluator(SummaryTools):
         self.config = state['config']
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         self.network = get_network(self.config, self.device)
         self.network.load_state_dict(state['weights'])
         self.network.eval()
+
         self.mcts = MCTS(self.config)
 
-        if 'evaluation' in self.config.render:
-          self.render = True
+        if self.config.render:
           self.viewer = ImageViewer()
-        else:
-          self.render = False
 
     def play_game(self, environment, device):
       game = self.config.new_game(environment)
+
       game.pred_values = []
       game.pred_rewards = []
       game.search_depths = []
@@ -245,7 +242,7 @@ class Evaluator(SummaryTools):
           game.apply(action)
           game.pred_rewards.append(reward)
 
-          if self.render:
+          if self.config.render:
             try:
               img = environment.obs_buffer.max(axis=0)
               self.viewer.imshow(img)
@@ -255,75 +252,13 @@ class Evaluator(SummaryTools):
           if game.terminal or game.step > self.config.max_steps:
             break
 
-      tag = "\033[92m[Game done]\033[0m"
-      print("\n" + tag + " --> length: {}, return: {}, pred return: {}, pred value: {}, mcts value: {}\n".format(game.step,
-                                                                                                                 round(game.sum_rewards, 1),
-                                                                                                                 round(sum(game.pred_rewards), 1),
-                                                                                                                 np.round(np.mean(game.pred_values), 1),
-                                                                                                                 np.round(np.mean(game.history.root_values), 1)))
+      msg = "\n\033[92m[Game done]\033[0m --> "
+      msg += "length: {}, return: {}, pred return: {}, pred value: {}, mcts value: {}\n"
+      print(msg.format(game.step, np.round(game.sum_rewards, 1),
+                       np.round(np.sum(game.pred_rewards), 1),
+                       np.round(np.mean(game.pred_values), 1),
+                       np.round(np.mean(game.history.root_values), 1)))
       return game
-
-
-def plot_aggregate(data, config):
-  ax1 = plt.subplot2grid((5, 1), (0, 0))
-  ax2 = plt.subplot2grid((5, 1), (1, 0))
-  ax3 = plt.subplot2grid((5, 1), (2, 0))
-  ax4 = plt.subplot2grid((5, 1), (3, 0))
-  ax5 = plt.subplot2grid((5, 1), (4, 0))
-  ax1.set_ylabel('Return', color='white', fontsize=15)
-  ax1.tick_params(colors='white')
-  ax2.set_ylabel('Predicted Return', color='white', fontsize=15)
-  ax2.tick_params(colors='white')
-  ax3.set_ylabel('Predicted Value', color='white', fontsize=15)
-  ax3.tick_params(colors='white')
-  ax4.set_ylabel('MCTS Value', color='white', fontsize=15)
-  ax4.tick_params(colors='white')
-  ax5.set_ylabel('Lenght', color='white', fontsize=15)
-  ax5.tick_params(colors='white')
-
-  return_quantiles = {'0.25': [], '0.5': [], '0.75': []}
-  pred_return_quantiles = {'0.25': [], '0.5': [], '0.75': []}
-  pred_values_quantiles = {'0.25': [], '0.5': [], '0.75': []}
-  root_values_quantiles = {'0.25': [], '0.5': [], '0.75': []}
-  lengths_quantiles = {'0.25': [], '0.5': [], '0.75': []}
-  for games in data.values():
-    returns = [sum(game.history.rewards) for game in games]
-    return_quantiles['0.25'].append(np.quantile(returns, 0.25))
-    return_quantiles['0.5'].append(np.quantile(returns, 0.5))
-    return_quantiles['0.75'].append(np.quantile(returns, 0.75))
-
-    pred_returns = [sum(game.pred_rewards) for game in games]
-    pred_return_quantiles['0.25'].append(np.quantile(pred_returns, 0.25))
-    pred_return_quantiles['0.5'].append(np.quantile(pred_returns, 0.5))
-    pred_return_quantiles['0.75'].append(np.quantile(pred_returns, 0.75))
-
-    pred_values = [np.mean(game.pred_values) for game in games]
-    pred_values_quantiles['0.25'].append(np.quantile(pred_values, 0.25))
-    pred_values_quantiles['0.5'].append(np.quantile(pred_values, 0.5))
-    pred_values_quantiles['0.75'].append(np.quantile(pred_values, 0.75))
-
-    root_values = [np.mean(game.history.root_values) for game in games]
-    root_values_quantiles['0.25'].append(np.quantile(root_values, 0.25))
-    root_values_quantiles['0.5'].append(np.quantile(root_values, 0.5))
-    root_values_quantiles['0.75'].append(np.quantile(root_values, 0.75))
-
-    lengths = [len(game.history.rewards) for game in games]
-    lengths_quantiles['0.25'].append(np.quantile(lengths, 0.25))
-    lengths_quantiles['0.5'].append(np.quantile(lengths, 0.5))
-    lengths_quantiles['0.75'].append(np.quantile(lengths, 0.75))
-
-  steps = list(data.keys())
-  ax1.plot(steps, return_quantiles['0.5'], linewidth=2)
-  ax2.plot(steps, pred_return_quantiles['0.5'], linewidth=2)
-  ax3.plot(steps, pred_values_quantiles['0.5'], linewidth=2)
-  ax4.plot(steps, root_values_quantiles['0.5'], linewidth=2)
-  ax5.plot(steps, lengths_quantiles['0.5'], linewidth=2)
-  if config.include_bounds:
-    ax1.fill_between(steps, y1=return_quantiles['0.25'], y2=return_quantiles['0.75'], alpha=0.4)
-    ax2.fill_between(steps, y1=pred_return_quantiles['0.25'], y2=pred_return_quantiles['0.75'], alpha=0.4)
-    ax3.fill_between(steps, y1=pred_values_quantiles['0.25'], y2=pred_values_quantiles['0.75'], alpha=0.4)
-    ax4.fill_between(steps, y1=root_values_quantiles['0.25'], y2=root_values_quantiles['0.75'], alpha=0.4)
-    ax5.fill_between(steps, y1=lengths_quantiles['0.25'], y2=lengths_quantiles['0.75'], alpha=0.4)
 
 def get_eval_tag(state, config, idx):
     if config.detailed_eval_tag:
@@ -378,17 +313,15 @@ def get_states(config):
 def run(evaluator, seed=None):
     environment = get_environment(evaluator.config)
 
-    if seed is None:
-      seed = np.random.randint(0, 1000)
-    set_all_seeds(seed)
-    environment.seed(seed)
+    if seed is not None:
+      set_all_seeds(seed)
+      environment.seed(seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     with torch.no_grad():
-        game = evaluator.play_game(environment, device)
+      game = evaluator.play_game(environment, device)
 
     game.history._replace(observations = [])
-
     return game
 
 if __name__ == '__main__':
@@ -396,6 +329,9 @@ if __name__ == '__main__':
     import pyglet
     import cv2
     from pyglet.gl import *
+
+    import os
+    os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
     ray.init()
 
@@ -427,6 +363,7 @@ if __name__ == '__main__':
         axes = evaluator.plot_summary(games, config, axes)
 
     if config.plot_summary:
+      plt.tight_layout()
       plt.show()
 
     if config.plot_aggregate:

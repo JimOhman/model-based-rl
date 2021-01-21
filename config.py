@@ -97,7 +97,7 @@ def make_config():
 
   ### Network
   network = parser.add_argument_group('network')
-  network.add_argument('--architecture', type=str, default='TinierNetwork')
+  network.add_argument('--architecture', type=str, default='FCNetwork')
   network.add_argument('--value_support', nargs='+', type=int, default=[-25, 25])
   network.add_argument('--reward_support', nargs='+', type=int, default=[-5, 5])
   network.add_argument('--no_support', action='store_true')
@@ -111,7 +111,7 @@ def make_config():
 
   ### Environment
   environment = parser.add_argument_group('environment')
-  environment.add_argument('--environment', type=str, default='BreakoutNoFrameskip-v4') # BreakoutNoFrameskip-v4 SpaceInvadersNoFrameskip-v4
+  environment.add_argument('--environment', type=str, default='CartPole-v1')
 
   # Environment Modifications
   environment_modifications = parser.add_argument_group('general environment modifications')
@@ -129,7 +129,7 @@ def make_config():
 
   ### Self-Play
   self_play = parser.add_argument_group('self play')
-  self_play.add_argument('--num_actors', nargs='+', type=int, default=[7])
+  self_play.add_argument('--num_actors', nargs='+', type=int, default=[10])
   self_play.add_argument('--max_steps', type=int, default=27000)
   self_play.add_argument('--num_simulations', nargs='+', type=int, default=[30])
   self_play.add_argument('--max_sequence_length', type=int, default=200)
@@ -162,7 +162,7 @@ def make_config():
   training.add_argument('--scalar_loss', type=str, default='MSE')
   training.add_argument('--num_unroll_steps', nargs='+', type=int, default=[5])
   training.add_argument('--checkpoint_frequency', type=int, default=100)
-  training.add_argument('--td_steps', nargs='+', type=int, default=10)
+  training.add_argument('--td_steps', nargs='+', type=int, default=[10])
   training.add_argument('--batch_size', nargs='+', type=int, default=[64])
   training.add_argument('--batches_per_fetch', type=int, default=15)
   training.add_argument('--stored_before_train', type=int, default=5000)
@@ -178,7 +178,7 @@ def make_config():
 
   # Learning rate scheduler
   training.add_argument('--lr_scheduler', type=str, default='')
-  training.add_argument('--lr_init', nargs='+', type=float, default=[0.0005])
+  training.add_argument('--lr_init', nargs='+', type=float, default=[0.005])
   training.add_argument('--lr_decay_rate', type=float, default=0.1)
   training.add_argument('--lr_decay_steps', type=int, default=350000)
 
@@ -216,9 +216,8 @@ def make_config():
   ### Debugging
   debug = parser.add_argument_group('debugging')
   debug.add_argument('--debug', action='store_true')
-  debug.add_argument('--render', nargs='+', type=str, default='')
+  debug.add_argument('--render', action='store_true')
   debug.add_argument('--verbose', nargs='+', type=str, default='')
-  debug.add_argument('--print_network_summary', action='store_true')
   debug.add_argument('--save_mcts_to_path', type=str, default='')
 
   args = vars(parser.parse_args())

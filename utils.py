@@ -3,20 +3,11 @@ from torch.optim.lr_scheduler import ExponentialLR
 from torch.optim import RMSprop, Adam, SGD
 from torch.nn import MSELoss, LogSoftmax, SmoothL1Loss
 from networks import MuZeroNetwork, FCNetwork, TinyNetwork
-from torchsummary import summary
 import numpy as np
 import random
 import torch
 import gym
 
-def print_network_summary(config):
-    network = get_network(config)
-    
-    summary(network.representation_head, (4, 96, 96))
-    summary(network.policy_head, (128, 6, 6))
-    summary(network.reward_head, (128+1, 6, 6))
-    summary(network.value_head, (128, 6, 6))
-    summary(network.transition_head, (128+1, 6, 6))
 
 def get_environment(config):
     environment = gym.make(config.environment)
@@ -43,17 +34,11 @@ def get_network(config, device=None):
       if config.stack_actions:
         input_channels *= 2
       network = TinyNetwork(input_channels, action_space, device, config)
-    elif config.architecture == 'TinierNetwork':
-      input_channels = config.stack_frames
-      if config.stack_actions:
-        input_channels *= 2
-      network = TinierNetwork(input_channels, action_space, device, config)
     elif config.architecture == 'FCNetwork':
       input_dim = config.stack_frames * np.shape(env.observation_space)[0]
       network = FCNetwork(input_dim, action_space, device, config)
     else:
       raise NotImplementedError
-
     return network
 
 def get_loss_functions(config):

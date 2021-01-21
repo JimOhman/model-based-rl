@@ -1,8 +1,6 @@
 import numpy as np
-import random
 import torch
 import math
-from copy import deepcopy
 
 
 class MinMaxStats(object):
@@ -73,12 +71,10 @@ class MCTS(object):
     search_paths = []
     for _ in range(self.num_simulations):
       node = root
-
       search_path = [node]
 
       while node.expanded():
         action, node = self.select_child(node)
-
         search_path.append(node)
 
       parent = search_path[-2]
