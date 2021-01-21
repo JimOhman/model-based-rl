@@ -220,7 +220,7 @@ class Evaluator(SummaryTools):
             write_mcts_as_png(mcts, path_to_file=self.config.save_mcts_to_path + str(game.step))
           game.search_depths.append(max(map(len, mcts)) - 1)
 
-          depth = 0
+          search_depth = 0
           node = root
           while node.expanded():
             action = self.config.select_action(root, temperature=self.config.temperature)
@@ -230,9 +230,9 @@ class Evaluator(SummaryTools):
             rewards.append(reward)
 
             node = node.children[action]
-            depth += 1
+            search_depth += 1
 
-            if depth == self.config.apply_mcts_steps:
+            if search_depth == self.config.apply_mcts_steps:
               break
 
         game.pred_values.append(initial_inference.value.item())
@@ -322,6 +322,7 @@ def run(evaluator, seed=None):
       game = evaluator.play_game(environment, device)
 
     game.history._replace(observations = [])
+    game.environment = None
     return game
 
 if __name__ == '__main__':

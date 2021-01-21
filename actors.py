@@ -46,7 +46,6 @@ class Actor(Logger):
       self.load_state(state, date)
 
     self.verbose = True if 'actors' in self.config.verbose else False
-    self.render = True if 'actors' in self.config.render else False
     self.log = True if 'actors' in self.config.log else False
 
     if self.log:
