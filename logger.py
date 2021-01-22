@@ -57,5 +57,4 @@ class Logger(object):
     os.makedirs(dirs['saves'], exist_ok=True)
     os.makedirs(dirs['config'], exist_ok=True)
     os.makedirs(dirs['worker'], exist_ok=True)
-
     return dirs

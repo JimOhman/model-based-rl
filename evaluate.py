@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import ray
 import random
+import os
 
 
 class ImageViewer(object):
@@ -178,6 +179,11 @@ class Evaluator(SummaryTools):
     def play_game(self, environment, device):
       game = self.config.new_game(environment)
 
+      if self.config.save_mcts:
+        path_to_mcts_folder = os.path.split(os.path.normpath(self.config.saves_dir))[0]
+        path_to_mcts_folder = os.path.join(path_to_mcts_folder, 'mcts')
+        os.makedirs(path_to_mcts_folder, exist_ok=True)
+
       game.pred_values = []
       game.pred_rewards = []
       game.search_depths = []
@@ -215,11 +221,13 @@ class Evaluator(SummaryTools):
           game.search_depths.append(1)
         else:
           mcts = self.mcts.run(root, self.network)
-          if self.config.save_mcts_to_path:
-            write_mcts_as_png(mcts, path_to_file=self.config.save_mcts_to_path + str(game.step))
+          if self.config.save_mcts:
+            path_to_file = os.path.join(path_to_mcts_folder, str(game.step)+'.png')
+            write_mcts_as_png(mcts, path_to_file=path_to_file)
+
           game.search_depths.append(max(map(len, mcts)) - 1)
 
-          search_depth = 0
+          times_applied = 0
           node = root
           while node.expanded():
             action = self.config.select_action(root, temperature=self.config.temperature)
@@ -229,9 +237,9 @@ class Evaluator(SummaryTools):
             rewards.append(reward)
 
             node = node.children[action]
-            search_depth += 1
+            times_applied += 1
 
-            if search_depth == self.config.apply_mcts_steps:
+            if times_applied == self.config.apply_mcts_steps:
               break
 
         game.pred_values.append(initial_inference.value.item())
@@ -293,6 +301,7 @@ def get_states(config):
                   if only_prior is True and only_value is True:
                     continue
                   state = deepcopy(meta_state)
+                  state['config'].saves_dir = saves_dir
                   state['config'].num_simulations = num_simulations
                   state['config'].temperature = temperature
                   state['config'].only_value = only_value
@@ -301,7 +310,7 @@ def get_states(config):
                   state['config'].apply_mcts_steps = apply_mcts_steps
                   state['config'].label = get_label(state, config, idx)
                   state['config'].render = config.render
-                  state['config'].save_mcts_to_path = config.save_mcts_to_path
+                  state['config'].save_mcts = config.save_mcts
                   states.append(state)
   return states
 
@@ -330,7 +339,6 @@ if __name__ == '__main__':
     import cv2
     from pyglet.gl import *
 
-    import os
     os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
     config = make_config()

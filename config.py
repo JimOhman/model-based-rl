@@ -98,16 +98,10 @@ def make_config():
   ### Network
   network = parser.add_argument_group('network')
   network.add_argument('--architecture', type=str, default='FCNetwork')
-  network.add_argument('--value_support', nargs='+', type=int, default=[-25, 25])
+  network.add_argument('--value_support', nargs='+', type=int, default=[-15, 15])
   network.add_argument('--reward_support', nargs='+', type=int, default=[-5, 5])
   network.add_argument('--no_support', action='store_true')
   network.add_argument('--seed', nargs='+', type=int, default=[None])
-
-  ## Myopic
-  myopic = parser.add_argument_group('myopic')
-  myopic.add_argument('--focal_size', nargs='+', type=int, default=[20, 20])
-  myopic.add_argument('--focal_step', type=int, default=2)
-  myopic.add_argument('--blurr', type=int, default=0)
 
   ### Environment
   environment = parser.add_argument_group('environment')
@@ -134,7 +128,7 @@ def make_config():
   self_play.add_argument('--num_simulations', nargs='+', type=int, default=[30])
   self_play.add_argument('--max_sequence_length', type=int, default=200)
   self_play.add_argument('--visit_softmax_temperatures', nargs='+', type=float, default=[1.0, 0.5, 0.25])
-  self_play.add_argument('--visit_softmax_steps', nargs='+', type=int, default=[50e3, 100e3])
+  self_play.add_argument('--visit_softmax_steps', nargs='+', type=int, default=[5e3, 10e3])
   self_play.add_argument('--fixed_temperatures', nargs='+', type=float, default=[])
 
   # Root prior exploration noise.
@@ -149,7 +143,7 @@ def make_config():
 
   ### Prioritized Replay Buffer
   per = parser.add_argument_group('prioritized experience replay')
-  per.add_argument('--window_size', nargs='+', type=int, default=[50000])
+  per.add_argument('--window_size', nargs='+', type=int, default=[10000])
   per.add_argument('--epsilon', type=float, default=0.01)
   per.add_argument('--alpha', type=float, default=1.)
   per.add_argument('--beta', type=float, default=1.)
@@ -179,8 +173,8 @@ def make_config():
   # Learning rate scheduler
   training.add_argument('--lr_scheduler', type=str, default='')
   training.add_argument('--lr_init', nargs='+', type=float, default=[0.005])
-  training.add_argument('--lr_decay_rate', type=float, default=0.1)
-  training.add_argument('--lr_decay_steps', type=int, default=350000)
+  training.add_argument('--lr_decay_rate', type=float, default=0.05)
+  training.add_argument('--lr_decay_steps', type=int, default=20000)
 
   ### Saving and Loading
   load_and_save = parser.add_argument_group('saving and loading')
@@ -218,7 +212,7 @@ def make_config():
   debug.add_argument('--debug', action='store_true')
   debug.add_argument('--render', action='store_true')
   debug.add_argument('--verbose', nargs='+', type=str, default='')
-  debug.add_argument('--save_mcts_to_path', type=str, default='')
+  debug.add_argument('--save_mcts', action='store_true')
 
   args = vars(parser.parse_args())
 
