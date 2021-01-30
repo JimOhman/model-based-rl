@@ -12,8 +12,10 @@ class Logger(object):
       self.dirs = self.get_dirs()
       self.save_config()
     else:
+      worker_folder = os.path.split(dirs['worker'])[0]
+      worker_folder = os.path.join(path_to_mcts_folder, self.worker_id)
+      dirs['worker'] = worker_folder
       self.dirs = dirs
-      self.dirs['worker'] = '/'.join(self.dirs['worker'].split('/')[:-1]) + '/' + self.worker_id
 
     self.writer = SummaryWriter(self.dirs['worker'])
 

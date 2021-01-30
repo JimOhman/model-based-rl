@@ -6,10 +6,13 @@ import ray
 class SumTree(object):
     position = 0
 
-    def __init__(self, capacity):
+    def __init__(self, capacity, capacity_step):
         self.tree = np.zeros(2 * capacity - 1)
         self.buffer = np.zeros(capacity, dtype=object)
         self.capacity = capacity
+        self.capacity_step = capacity_step
+        self.moving_capacity = self.capacity_step
+        self.old_cap = 0
         self.num_memories = 0
 
     def add(self, priorities, history):
@@ -18,10 +21,16 @@ class SumTree(object):
           self.buffer[self.position] = (step, history)
           self.update(idx, priority)
 
-          self.position = (self.position + 1) % self.capacity
-
-          if self.num_memories < self.capacity:
+          if self.position >= self.old_cap:
             self.num_memories += 1
+
+          self.position = (self.position + 1) % self.moving_capacity
+
+          if self.position == 0:
+            print(self.num_memories)
+            self.old_cap = self.moving_capacity
+            print("did hit: ", self.moving_capacity)
+            self.moving_capacity = min(self.capacity, (self.moving_capacity+self.capacity_step))
 
     def update(self, idx, priority):
         change = priority - self.tree[idx]
@@ -58,11 +67,12 @@ class SumTree(object):
         return self.tree[0]
 
 
-@ray.remote
+@ray.remote(num_cpus=1)
 class PrioritizedReplay():
 
     def __init__(self, config):
         self.window_size = config.window_size
+        self.window_step = config.window_step
         self.batch_size = config.batch_size
 
         self.beta_increment_per_sampling = config.beta_increment_per_sampling
@@ -74,7 +84,13 @@ class PrioritizedReplay():
         self.td_steps = config.td_steps
         self.discount = config.discount
         
-        self.tree = SumTree(capacity=self.window_size)
+        capacity = self.windows_size
+        if self.window_step is None:
+          capacity_step = self.window_step
+        else:
+          capacity_step = self.windows_size
+        
+        self.tree = SumTree(capacity, capacity_step)
 
         self.throughput = 0
 
@@ -95,7 +111,6 @@ class PrioritizedReplay():
 
     def sample_batch(self):
         priorities = []
-        batch = []
         batch_observations = []
         batch_actions = []
         batch_targets = []
@@ -122,7 +137,7 @@ class PrioritizedReplay():
           num_actions = len(history.child_visits[0])
           while len(actions) < self.num_unroll_steps:
             actions.append(np.random.randint(num_actions))
-          absorbing_policy = [1/num_actions] * num_actions
+          absorbing_policy = [0] * num_actions
 
           target = self.make_target(history, step, absorbing_policy)
           
@@ -133,14 +148,12 @@ class PrioritizedReplay():
         batch = [batch_observations, batch_actions, batch_targets]
 
         sampling_probabilities = priorities / self.tree.total_priority
-        is_weights = np.power(self.tree.num_memories * sampling_probabilities, -self.beta)
-        is_weights = is_weights / is_weights.max()
+        is_weights = np.power(self.tree.num_memories*sampling_probabilities, -self.beta)
+        is_weights /= is_weights.max()
 
         return batch, idxs, is_weights
 
     def make_target(self, history, step, absorbing_policy):
-        done_indexes = history.dones[step:step + self.num_unroll_steps + 1]
-
         end_index = len(history.root_values)
 
         target_rewards, target_values, target_policies = [], [], []
@@ -155,9 +168,9 @@ class PrioritizedReplay():
             value += reward * self.discount**i
 
           if current_index > 0 and current_index <= len(history.rewards):
-              last_reward = history.rewards[current_index - 1]
+            last_reward = history.rewards[current_index - 1]
           else:
-              last_reward = 0
+            last_reward = 0
 
           if current_index < end_index:
             target_policies.append(history.child_visits[current_index])
@@ -167,7 +180,7 @@ class PrioritizedReplay():
             target_policies.append(absorbing_policy)
             target_rewards.append(last_reward)
             target_values.append(0)
-        
+
         return target_rewards, target_values, target_policies
 
     def update(self, idxs, errors):

@@ -1,10 +1,11 @@
 from utils import get_network, get_optimizer, get_lr_scheduler, get_loss_functions, set_all_seeds
+from mcts import MCTS, Node
 from logger import Logger
 from copy import deepcopy
 import datetime
-import pytz
 import torch
 import time
+import pytz
 import ray
 
 
@@ -39,8 +40,7 @@ class Learner(Logger):
     if state is not None:
       self.load_state(state, date)
 
-    if self.log:
-      Logger.__init__(self)
+    Logger.__init__(self)
 
   def load_state(self, state, date):
     self.network.load_state_dict(state['weights'])
@@ -106,8 +106,8 @@ class Learner(Logger):
 
             if self.config.debug:
               for name, weights in self.network.named_parameters():
-                  self.log_histogram(weights.grad.data.cpu().numpy(), 'gradients' + '/' + name + '_grad', self.training_step)
-                  self.log_histogram(weights.data.cpu().numpy(), 'network_weights' + '/' + name, self.training_step)
+                self.log_histogram(weights.grad.data.cpu().numpy(), 'gradients' + '/' + name + '_grad', self.training_step)
+                self.log_histogram(weights.data.cpu().numpy(), 'network_weights' + '/' + name, self.training_step)
 
           self.losses_to_log['reward'] = 0
           self.losses_to_log['value'] = 0
@@ -130,7 +130,7 @@ class Learner(Logger):
 
     target_rewards, target_values, target_policies = zip(*targets)
 
-    observations = self.config.to_torch(observations, self.device)
+    observations = self.config.to_torch(observations, self.device, norm=self.config.norm_states)
 
     target_policies = self.config.to_torch(target_policies, self.device)
     target_values = self.config.to_torch(target_values, self.device)

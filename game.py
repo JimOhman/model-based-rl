@@ -2,7 +2,7 @@ from typing import NamedTuple
 import numpy as np
 
 
-class History(NamedTuple):
+class HistorySlice(NamedTuple):
   observations: list
   child_visits: list
   root_values: list
@@ -10,6 +10,33 @@ class History(NamedTuple):
   rewards: list
   errors: list
   dones: list
+
+
+class History():
+
+  def __init__(self, observations: list,
+                     child_visits: list,
+                     root_values: list,
+                     actions: list,
+                     rewards: list,
+                     errors: list,
+                     dones: list):
+    self.observations = observations
+    self.child_visits = child_visits
+    self.root_values = root_values
+    self.actions = actions
+    self.rewards = rewards
+    self.errors = errors
+    self.dones = dones
+
+  def get_slice(self, collect_from):
+    return HistorySlice(self.observations[collect_from:],
+                        self.child_visits[collect_from:],
+                        self.root_values[collect_from:],
+                        self.actions[collect_from:],
+                        self.rewards[collect_from:],
+                        self.errors[collect_from:],
+                        self.dones[collect_from:])
 
 
 class Game(object):
@@ -43,9 +70,8 @@ class Game(object):
 
     if done:
       observation = self.environment.reset()
-      self.history.observations.append(observation)
-    else:
-      self.history.observations.append(observation)
+
+    self.history.observations.append(observation)
 
   def store_search_statistics(self, root):
     sum_visits = sum(child.visit_count for child in root.children)
@@ -59,6 +85,6 @@ class Game(object):
     return self.history.observations[state_index]
 
   def get_history_sequence(self, collect_from):
-    history = History(*[data[collect_from:] for data in self.history])
+    history = self.history.get_slice(collect_from)
     self.previous_collect_to = self.step
     return history

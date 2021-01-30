@@ -5,6 +5,7 @@ from learners import Learner
 from config import make_config
 from copy import deepcopy
 import datetime
+import pickle
 import torch
 import pytz
 import time
@@ -27,6 +28,14 @@ def launch(config, run_tag, group_tag, date):
   actors = [Actor.remote(actor_id, config, storage, replay_buffer, state, run_tag, group_tag, date) for actor_id in range(config.num_actors)]
   learner = Learner.remote(config, storage, replay_buffer, state, run_tag, group_tag, date)
   workers = actors + [learner]
+
+  if config.inject_games_from is not None:
+    for path in config.inject_games_from:
+      with open('{}.pkl'.format(path), 'rb') as input:
+        games = pickle.load(input)
+      for idx, history in enumerate(games):
+        actor_idx = idx % len(actors)
+        actors[actor_idx].reanalyze_history.remote(history, keep_local=True)
 
   print("\n\033[92mStarting date: {}\033[0m".format(date))
   print("Using environment: {}.".format(config.environment))
@@ -86,34 +95,48 @@ def get_run_tag(meta_config, config, date):
     run_tag = config.run_tag
   return run_tag
 
-if __name__ == '__main__':
-  import os
-  os.environ["OMP_NUM_THREADS"] = "1"
 
-  meta_config = make_config()
-
+def config_generator(meta_config):
   for seed in meta_config.seed:
     for num_actors in meta_config.num_actors:
       for lr_init in meta_config.lr_init:
         for discount in meta_config.discount:
           for window_size in meta_config.window_size:
-            for batch_size in meta_config.batch_size:
-              for num_simulations in meta_config.num_simulations:
-                for num_unroll_steps in meta_config.num_unroll_steps:
-                  for td_steps in meta_config.td_steps:
+            for window_step in meta_config.window_step:
+              for batch_size in meta_config.batch_size:
+                for num_simulations in meta_config.num_simulations:
+                  for num_unroll_steps in meta_config.num_unroll_steps:
+                    for td_steps in meta_config.td_steps:
 
-                    config = deepcopy(meta_config)
-                    config.seed = seed
-                    config.num_actors = num_actors
-                    config.lr_init = lr_init
-                    config.discount = discount
-                    config.batch_size = batch_size
-                    config.num_simulations = num_simulations
-                    config.num_unroll_steps = num_unroll_steps
-                    config.window_size = window_size
-                    config.td_steps = td_steps
 
-                    date = datetime.datetime.now(tz=pytz.timezone('Europe/Stockholm')).strftime("%d-%b-%Y_%H-%M-%S")
-                    run_tag = get_run_tag(meta_config, config, date)
+                      config = deepcopy(meta_config)
 
-                    launch(config, run_tag, config.group_tag, date)
+                      if config.seed is None:
+                        config.seed = np.random.randint(1000)
+                      else:
+                        config.seed = seed
+
+                      config.num_actors = num_actors
+                      config.lr_init = lr_init
+                      config.discount = discount
+                      config.batch_size = batch_size
+                      config.num_simulations = num_simulations
+                      config.num_unroll_steps = num_unroll_steps
+                      config.window_size = window_size
+                      config.window_step = window_step
+                      config.td_steps = td_steps
+
+                      yield config
+
+
+if __name__ == '__main__':
+  import os
+  os.environ["OMP_NUM_THREADS"] = "1"
+
+  meta_config = make_config()
+  
+  for config in config_generator(meta_config):
+    date = datetime.datetime.now(tz=pytz.timezone('Europe/Stockholm')).strftime("%d-%b-%Y_%H-%M-%S")
+    run_tag = get_run_tag(meta_config, config, date)
+
+    launch(config, run_tag, config.group_tag, date)

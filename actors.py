@@ -48,8 +48,35 @@ class Actor(Logger):
     self.verbose = True if 'actors' in self.config.verbose else False
     self.log = True if 'actors' in self.config.log else False
 
-    if self.log:
-      Logger.__init__(self)
+    self.histories = []
+
+    Logger.__init__(self)
+
+  def reanalyze_history(self, history, keep_local=False):
+    for idx, observation in enumerate(history.observations[:-1]):
+      root = Node(0)
+
+      current_observation = self.config.to_torch(observation, self.device).unsqueeze(0)
+      initial_inference = self.network.initial_inference(current_observation)
+
+      root.expand(network_output=initial_inference)
+      root.add_exploration_noise(self.config.root_dirichlet_alpha, self.config.root_exploration_fraction)
+
+      self.mcts.run(root, self.network)
+
+      error = root.value() - initial_inference.value.item()
+      sum_visits = sum(child.visit_count for child in root.children)
+      policy = [child.visit_count / sum_visits for child in root.children]
+      root_value = root.value()
+
+      history.child_visits[idx] = policy
+      history.root_values[idx] = root_value
+      history.errors[idx] = error
+
+    if keep_local:
+      self.histories.append(history)
+    self.replay_buffer.save_history.remote(history)
+    self.prev_reanalyze_step = self.training_step
 
   def load_state(self, state, date):
     self.network.load_state_dict(state['weights'])
@@ -90,16 +117,24 @@ class Actor(Logger):
         self.return_to_log = 0
         self.length_to_log = 0
 
+      if (self.training_step - self.prev_reanalyze_step) > self.config.reanalyze_injected_frequency:
+        for history in self.histories:
+          print("is reanalyzing!")
+          self.reanalyze_history(history)
+
       self.sync_weights()
 
   def play_game(self):
     game = self.config.new_game(self.environment)
-    temperature = self.config.visit_softmax_temperature(self.training_step) if self.temperature is None else self.temperature
+    if self.temperature is None:
+      temperature = self.config.visit_softmax_temperature(self.training_step)
+    else:
+      temperature = self.temperature
 
     while not game.terminal and game.step < self.config.max_steps:
       root = Node(0)
 
-      current_observation = self.config.to_torch(game.get_observation(-1), self.device).unsqueeze(0)
+      current_observation = self.config.to_torch(game.get_observation(-1), self.device, norm=self.config.norm_states).unsqueeze(0)
       initial_inference = self.network.initial_inference(current_observation)
 
       root.expand(network_output=initial_inference)
@@ -124,6 +159,7 @@ class Actor(Logger):
           collect_from = game.previous_collect_to
         history = game.get_history_sequence(collect_from)
         self.replay_buffer.save_history.remote(history, ignore=ignore)
+    
     return game
 
   def launch(self):

@@ -52,7 +52,7 @@ class Node(object):
   def add_exploration_noise(self, dirichlet_alpha, exploration_fraction):
     noise = np.random.dirichlet([dirichlet_alpha] * len(self.children))
     for a, n in enumerate(noise):
-      self.children[a].prior = self.children[a].prior * (1 - exploration_fraction) + n * exploration_fraction
+      self.children[a].prior = self.children[a].prior*(1 - exploration_fraction) + n*exploration_fraction
 
 
 class MCTS(object):
@@ -91,10 +91,9 @@ class MCTS(object):
   def select_child(self, node):
     if node.visit_count == 0:
       action = np.random.choice(len(node.children))
-      child = node.children[action]
     else:
       action = np.argmax([self.ucb_score(node, child) for child in node.children])
-      child = node.children[action]
+    child = node.children[action]
     return action, child
 
   def ucb_score(self, parent, child):
@@ -113,4 +112,3 @@ class MCTS(object):
       node.visit_count += 1
       self.min_max_stats.update(node.reward + self.discount * node.value())
       value = node.reward + self.discount * value
-

@@ -18,6 +18,11 @@ class Config(object):
       self.reward_support_range = list(range(self.reward_support_min, self.reward_support_max + 1))
       self.reward_support_size = len(self.reward_support_range)
 
+      if self.norm_states:
+        self.state_min = self.state_range[::2]
+        self.state_max = self.state_range[1::2]
+        self.state_range = list(np.array(self.state_max) - np.array(self.state_min))
+
   def inverse_reward_transform(self, reward_logits):
       return self.inverse_transform(reward_logits, self.reward_support_range)
 
@@ -48,10 +53,10 @@ class Config(object):
       else:
         return temp3
 
-  def to_torch(self, x, device):
+  def to_torch(self, x, device, norm=False):
     x = np.float32(x)
-    if self.scale_state is not None:
-      x = (x - self.scale_state[0]) / (self.scale_state[1] - self.scale_state[0])
+    if norm:
+      x = (x - np.array(self.state_max, dtype=np.float32)) / np.array(self.state_range, dtype=np.float32)
     return torch.from_numpy(x).to(device)
 
   @staticmethod
@@ -99,19 +104,21 @@ def make_config():
   network = parser.add_argument_group('network')
   network.add_argument('--architecture', type=str, default='FCNetwork')
   network.add_argument('--value_support', nargs='+', type=int, default=[-15, 15])
-  network.add_argument('--reward_support', nargs='+', type=int, default=[-5, 5])
+  network.add_argument('--reward_support', nargs='+', type=int, default=[-15, 15])
   network.add_argument('--no_support', action='store_true')
   network.add_argument('--seed', nargs='+', type=int, default=[None])
 
   ### Environment
   environment = parser.add_argument_group('environment')
-  environment.add_argument('--environment', type=str, default='CartPole-v1')
+  environment.add_argument('--environment', type=str, default='LunarLander-v2')
 
   # Environment Modifications
   environment_modifications = parser.add_argument_group('general environment modifications')
   environment_modifications.add_argument('--scale_state', nargs='+', type=int, default=None)
   environment_modifications.add_argument('--clip_rewards', action='store_true')
   environment_modifications.add_argument('--stack_frames', type=int, default=1)
+  environment_modifications.add_argument('--state_range', nargs='+', type=float, default=None)
+  environment_modifications.add_argument('--norm_states', action='store_true')
 
   atari = parser.add_argument_group('atari environment modifications')
   atari.add_argument('--wrap_atari', action='store_true')
@@ -123,12 +130,12 @@ def make_config():
 
   ### Self-Play
   self_play = parser.add_argument_group('self play')
-  self_play.add_argument('--num_actors', nargs='+', type=int, default=[10])
+  self_play.add_argument('--num_actors', nargs='+', type=int, default=[8])
   self_play.add_argument('--max_steps', type=int, default=27000)
   self_play.add_argument('--num_simulations', nargs='+', type=int, default=[30])
-  self_play.add_argument('--max_sequence_length', type=int, default=200)
+  self_play.add_argument('--max_sequence_length', type=int, default=300)
   self_play.add_argument('--visit_softmax_temperatures', nargs='+', type=float, default=[1.0, 0.5, 0.25])
-  self_play.add_argument('--visit_softmax_steps', nargs='+', type=int, default=[5e3, 10e3])
+  self_play.add_argument('--visit_softmax_steps', nargs='+', type=int, default=[15e3, 30e3])
   self_play.add_argument('--fixed_temperatures', nargs='+', type=float, default=[])
 
   # Root prior exploration noise.
@@ -143,7 +150,8 @@ def make_config():
 
   ### Prioritized Replay Buffer
   per = parser.add_argument_group('prioritized experience replay')
-  per.add_argument('--window_size', nargs='+', type=int, default=[10000])
+  per.add_argument('--window_size', nargs='+', type=int, default=[100000])
+  per.add_argument('--window_step', nargs='+', type=int, default=[10000])
   per.add_argument('--epsilon', type=float, default=0.01)
   per.add_argument('--alpha', type=float, default=1.)
   per.add_argument('--beta', type=float, default=1.)
@@ -156,14 +164,16 @@ def make_config():
   training.add_argument('--scalar_loss', type=str, default='MSE')
   training.add_argument('--num_unroll_steps', nargs='+', type=int, default=[5])
   training.add_argument('--checkpoint_frequency', type=int, default=100)
-  training.add_argument('--td_steps', nargs='+', type=int, default=[10])
-  training.add_argument('--batch_size', nargs='+', type=int, default=[64])
+  training.add_argument('--td_steps', nargs='+', type=int, default=[50])
+  training.add_argument('--batch_size', nargs='+', type=int, default=[32])
   training.add_argument('--batches_per_fetch', type=int, default=15)
-  training.add_argument('--stored_before_train', type=int, default=5000)
+  training.add_argument('--stored_before_train', type=int, default=10000)
   training.add_argument('--clip_grad', type=int, default=0)
   training.add_argument('--no_target_transform', action='store_true')
   training.add_argument('--sampling_ratio', type=float, default=0.)
   training.add_argument('--discount', nargs='+', type=float, default=[0.997])
+  training.add_argument('--inject_experiences_from', nargs='+', type=str, default=None)
+  training.add_argument('--reanalyze_injected_frequency', type=int, default=10000)
 
   # Optimizer
   training.add_argument('--optimizer', type=str, default='Adam')
@@ -198,6 +208,10 @@ def make_config():
   evaluation.add_argument('--smooth', type=int, default=0)
   evaluation.add_argument('--apply_mcts_steps', nargs='+', type=int, default=[1])
   evaluation.add_argument('--parallel', action='store_true')
+
+  ### Inject human games
+  injection = parser.add_argument_group('injection')
+  injection.add_argument('--histories_path', type=str, default=None)
 
   ### Logging
   logging = parser.add_argument_group('logging')

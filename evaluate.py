@@ -190,7 +190,7 @@ class Evaluator(SummaryTools):
       while not game.terminal and game.step < self.config.max_steps:
         root = Node(0)
 
-        current_observation = self.config.to_torch(game.get_observation(-1), device).unsqueeze(0)
+        current_observation = self.config.to_torch(game.get_observation(-1), device, norm=self.config.norm_states).unsqueeze(0)
         initial_inference = self.network.initial_inference(current_observation)
 
         root.expand(network_output=initial_inference)
@@ -323,7 +323,7 @@ def run(evaluator, seed=None):
     with torch.no_grad():
       game = evaluator.play_game(environment, device)
 
-    game.history._replace(observations = [])
+    game.history.observations = []
     game.environment = None
     return game
 
