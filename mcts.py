@@ -90,7 +90,7 @@ class MCTS(object):
 
   def select_child(self, node):
     if node.visit_count == 0:
-      action = np.random.choice(len(node.children))
+      action = np.random.randint(len(node.children))
     else:
       action = np.argmax([self.ucb_score(node, child) for child in node.children])
     child = node.children[action]

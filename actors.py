@@ -13,11 +13,11 @@ import random
 @ray.remote(num_cpus=1)
 class Actor(Logger):
 
-  def __init__(self, worker_id, config, storage, replay_buffer, state=None, run_tag=None, group_tag=None, date=None):
+  def __init__(self, worker_id, config, storage, replay_buffer, state=None, run_tag=None, date=None):
     set_all_seeds(config.seed + worker_id if config.seed is not None else None)
 
     self.run_tag = run_tag
-    self.group_tag = group_tag
+    self.group_tag = config.group_tag
     self.worker_id = 'actor-{}'.format(worker_id)
     self.config = deepcopy(config)
     self.storage = storage
@@ -49,6 +49,7 @@ class Actor(Logger):
     self.log = True if 'actors' in self.config.log else False
 
     self.histories = []
+    self.prev_reanalyze_step = 0
 
     Logger.__init__(self)
 
@@ -75,6 +76,7 @@ class Actor(Logger):
 
     if keep_local:
       self.histories.append(history)
+
     self.replay_buffer.save_history.remote(history)
     self.prev_reanalyze_step = self.training_step
 
@@ -117,15 +119,19 @@ class Actor(Logger):
         self.return_to_log = 0
         self.length_to_log = 0
 
-      if (self.training_step - self.prev_reanalyze_step) > self.config.reanalyze_injected_frequency:
+      if (self.training_step - self.prev_reanalyze_step) > self.config.reanalyze_frequency:
+        if not self.histories:
+          self.histories = self.replay_buffer.sample_histories(amount=10)
+
         for history in self.histories:
-          print("is reanalyzing!")
           self.reanalyze_history(history)
 
       self.sync_weights()
 
-  def play_game(self):
-    game = self.config.new_game(self.environment)
+  def play_game(self, game=None):
+    if game is None:
+      game = self.config.new_game(self.environment)
+
     if self.temperature is None:
       temperature = self.config.visit_softmax_temperature(self.training_step)
     else:
@@ -150,14 +156,17 @@ class Actor(Logger):
       game.apply(action)
       game.store_search_statistics(root)
 
-      if (game.step - game.previous_collect_to) % self.config.max_sequence_length == 0 or game.done:
+      save_history = (game.step - game.previous_collect_to) >= self.config.max_history_length
+      save_history = save_history or game.done or game.terminal
+      if save_history:
         overlap = self.config.num_unroll_steps + self.config.td_steps
-        ignore = overlap if not game.done else None
         if not game.history.dones[game.previous_collect_to - 1]:
           collect_from = max(0, game.previous_collect_to - overlap)
         else:
           collect_from = game.previous_collect_to
         history = game.get_history_sequence(collect_from)
+        use_ignore = not game.done and not game.terminal
+        ignore = overlap if use_ignore else None
         self.replay_buffer.save_history.remote(history, ignore=ignore)
     
     return game

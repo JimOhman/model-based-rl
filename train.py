@@ -12,7 +12,7 @@ import time
 import ray
 
 
-def launch(config, run_tag, group_tag, date):
+def launch(config, run_tag, date):
   ray.init()
 
   if config.load_state:
@@ -25,15 +25,15 @@ def launch(config, run_tag, group_tag, date):
   storage = SharedStorage.remote(config.num_actors)
   replay_buffer = PrioritizedReplay.remote(config)
 
-  actors = [Actor.remote(actor_id, config, storage, replay_buffer, state, run_tag, group_tag, date) for actor_id in range(config.num_actors)]
-  learner = Learner.remote(config, storage, replay_buffer, state, run_tag, group_tag, date)
+  actors = [Actor.remote(actor_id, config, storage, replay_buffer, state, run_tag, date) for actor_id in range(config.num_actors)]
+  learner = Learner.remote(config, storage, replay_buffer, state, run_tag, date)
   workers = actors + [learner]
 
-  if config.inject_games_from is not None:
-    for path in config.inject_games_from:
+  if config.inject_experiences_from is not None:
+    for path in config.inject_experiences_from:
       with open('{}.pkl'.format(path), 'rb') as input:
-        games = pickle.load(input)
-      for idx, history in enumerate(games):
+        histories = pickle.load(input)
+      for idx, history in enumerate(histories):
         actor_idx = idx % len(actors)
         actors[actor_idx].reanalyze_history.remote(history, keep_local=True)
 
@@ -139,4 +139,4 @@ if __name__ == '__main__':
     date = datetime.datetime.now(tz=pytz.timezone('Europe/Stockholm')).strftime("%d-%b-%Y_%H-%M-%S")
     run_tag = get_run_tag(meta_config, config, date)
 
-    launch(config, run_tag, config.group_tag, date)
+    launch(config, run_tag, date)

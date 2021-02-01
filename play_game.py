@@ -24,34 +24,28 @@ class HumanActor():
       self.replay_buffer = []
 
     self.environment = get_environment(config)
+    self.actions = self.environment.action_space.n
 
     if config.seed is not None:
       self.environment.seed(config.seed)
 
   def play_game(self):
-    global human_agent_action, human_wants_restart, human_sets_pause
-
-    ACTIONS = self.environment.action_space.n
-    SKIP_CONTROL = 0
+    global human_agent_action
 
     human_agent_action = 0
-    human_wants_restart = False
-    human_sets_pause = False
 
     def key_press(key, mod):
-      global human_agent_action, human_wants_restart, human_sets_pause
-      if key==0xff0d: human_wants_restart = True
-      if key==32: human_sets_pause = not human_sets_pause
+      global human_agent_action
       a = int( key - ord('0') )
-      if a <= 0 or a >= ACTIONS: return
+      if a <= 0 or a >= self.actions: return
       human_agent_action = a
 
     def key_release(key, mod):
       global human_agent_action
       a = int( key - ord('0') )
-      if a <= 0 or a >= ACTIONS: return
+      if a <= 0 or a >= self.actions: return
       if human_agent_action == a:
-        human_agent_action = 0
+        human_agent_action = self.default_action
 
     self.environment.reset()
     self.environment.render()
@@ -68,14 +62,14 @@ class HumanActor():
 
       self.environment.render()
             
-      skip = 0
+      skip_count = 0
       while not game.terminal:
 
-        if not skip:
+        if not skip_count:
           action = human_agent_action
-          skip = SKIP_CONTROL
+          skip_count = self.config.sticky_actions
         else:
-          skip -= 1
+          skip_count -= 1
 
         game.apply(action)
 
@@ -144,6 +138,8 @@ if __name__ == '__main__':
   args.add_argument('--stack_frames', type=int, default=1)
   args.add_argument('--episode_life', action='store_true')
   args.add_argument('--clip_rewards', action='store_true')
+  args.add_argument('--sticky_actions', type=int, default=0)
+  args.add_argument('--default_action', type=int, default=0)
 
   config = args.parse_args()
 

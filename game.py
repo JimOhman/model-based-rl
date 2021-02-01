@@ -44,6 +44,7 @@ class Game(object):
   def __init__(self, environment, config):
     self.episode_life = config.episode_life
     self.clip_rewards = config.clip_rewards
+    self.sticky_actions = config.sticky_actions
     self.environment = environment
 
     self.history = History([], [], [], [], [], [], [])
@@ -56,22 +57,27 @@ class Game(object):
 
   def apply(self, action):
     observation, reward, done, info = self.environment.step(action)
-    self.terminal = self.environment.was_real_done if self.episode_life else done
-    self.done = done
 
-    self.sum_rewards += reward
-    self.step += 1
-
-    self.history.actions.append(action)
-    self.history.dones.append(done)
     if self.clip_rewards:
-      reward = np.sign(reward)
-    self.history.rewards.append(reward)
+      self.sum_rewards += self.environment.original_reward
+    else:
+      self.sum_rewards += reward
+
+    self.step += self.sticky_actions
+
+    self.terminal = self.environment.was_real_done if self.episode_life else done
 
     if done:
       observation = self.environment.reset()
 
     self.history.observations.append(observation)
+
+    if self.step >= self.environment._max_episode_steps:
+      done = False
+
+    self.history.actions.append(action)
+    self.history.dones.append(done)
+    self.history.rewards.append(reward)
 
   def store_search_statistics(self, root):
     sum_visits = sum(child.visit_count for child in root.children)
@@ -86,5 +92,5 @@ class Game(object):
 
   def get_history_sequence(self, collect_from):
     history = self.history.get_slice(collect_from)
-    self.previous_collect_to = self.step
+    self.previous_collect_to = int(self.step / self.sticky_actions)
     return history

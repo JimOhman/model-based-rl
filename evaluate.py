@@ -221,14 +221,15 @@ class Evaluator(SummaryTools):
           game.search_depths.append(1)
         else:
           mcts = self.mcts.run(root, self.network)
+
           if self.config.save_mcts:
             path_to_file = os.path.join(path_to_mcts_folder, str(game.step)+'.png')
             write_mcts_as_png(mcts, path_to_file=path_to_file)
 
           game.search_depths.append(max(map(len, mcts)) - 1)
 
-          times_applied = 0
           node = root
+          times_applied = 0
           while node.expanded():
             action = self.config.select_action(root, temperature=self.config.temperature)
             reward = node.children[action].reward

@@ -25,8 +25,8 @@ def write_mcts_as_png(search_paths, max_search_depth=float('inf'), path_to_file=
         if node.visit_count > 1:
           if i == 0:
             root_args = args.copy()
-            c, v = node.visit_count, round(node.value(), 2)
-            root_args['label'] = "c:{}, v:{}".format(c, v)
+            c, v = node.visit_count, node.value()
+            root_args['label'] = "c:{}, v:{:.2f}".format(c, v)
             root_args['penwidth'] = 4
             graph.add_node(pydot.Node(str(node), **root_args))
             chosen_nodes.append(node)
@@ -40,13 +40,13 @@ def write_mcts_as_png(search_paths, max_search_depth=float('inf'), path_to_file=
             edge_args = args.copy()
 
             node_args['label'] = 'nv'
-            edge_args['label'] = 'p:{}'.format(round(child.prior, 2))
+            edge_args['label'] = 'p:{:.2f}'.format(child.prior)
             edge_args['fontsize'] = 10
 
             if child.visit_count > 0:
-              c, v = child.visit_count, round(child.value(), 2)
-              node_args['label'] = "c:{}, v:{}".format(c, v)
-              edge_args['label'] += ', r:{}'.format(round(child.reward, 2))
+              c, v = child.visit_count, child.value()
+              node_args['label'] = "c:{}, v:{:.2f}".format(c, v)
+              edge_args['label'] += ', r:{:.2f}'.format(child.reward)
               node_args['arrow'] = 'forward'
               edge_args['style'] = 'filled'
             else:

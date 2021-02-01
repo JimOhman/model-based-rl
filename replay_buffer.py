@@ -84,12 +84,12 @@ class PrioritizedReplay():
         self.td_steps = config.td_steps
         self.discount = config.discount
         
-        capacity = self.windows_size
+        capacity = self.window_size
         if self.window_step is None:
           capacity_step = self.window_step
         else:
-          capacity_step = self.windows_size
-        
+          capacity_step = self.window_size
+
         self.tree = SumTree(capacity, capacity_step)
 
         self.throughput = 0
@@ -152,6 +152,16 @@ class PrioritizedReplay():
         is_weights /= is_weights.max()
 
         return batch, idxs, is_weights
+
+    def sample_histories(self, amount=1):
+      histories = {}
+      for _ in range(amount):
+        s1, s2 = 0.9*self.tree.total_priority, self.tree.total_priority
+        value = random.uniform(s1, s2)
+
+        idx, priority, step, history = self.tree.get_leaf(value)
+        histories[priority] = [idx, step, history]
+      return histories
 
     def make_target(self, history, step, absorbing_policy):
         end_index = len(history.root_values)

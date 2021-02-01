@@ -119,6 +119,8 @@ def make_config():
   environment_modifications.add_argument('--stack_frames', type=int, default=1)
   environment_modifications.add_argument('--state_range', nargs='+', type=float, default=None)
   environment_modifications.add_argument('--norm_states', action='store_true')
+  environment_modifications.add_argument('--max_episode_steps', type=int, default=None)
+  environment_modifications.add_argument('--sticky_actions', type=int, default=1)
 
   atari = parser.add_argument_group('atari environment modifications')
   atari.add_argument('--wrap_atari', action='store_true')
@@ -133,7 +135,7 @@ def make_config():
   self_play.add_argument('--num_actors', nargs='+', type=int, default=[8])
   self_play.add_argument('--max_steps', type=int, default=27000)
   self_play.add_argument('--num_simulations', nargs='+', type=int, default=[30])
-  self_play.add_argument('--max_sequence_length', type=int, default=300)
+  self_play.add_argument('--max_history_length', type=int, default=300)
   self_play.add_argument('--visit_softmax_temperatures', nargs='+', type=float, default=[1.0, 0.5, 0.25])
   self_play.add_argument('--visit_softmax_steps', nargs='+', type=int, default=[15e3, 30e3])
   self_play.add_argument('--fixed_temperatures', nargs='+', type=float, default=[])
@@ -173,7 +175,7 @@ def make_config():
   training.add_argument('--sampling_ratio', type=float, default=0.)
   training.add_argument('--discount', nargs='+', type=float, default=[0.997])
   training.add_argument('--inject_experiences_from', nargs='+', type=str, default=None)
-  training.add_argument('--reanalyze_injected_frequency', type=int, default=10000)
+  training.add_argument('--reanalyze_frequency', type=float, default=np.float('inf'))
 
   # Optimizer
   training.add_argument('--optimizer', type=str, default='Adam')

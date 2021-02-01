@@ -16,6 +16,8 @@ class NoopResetEnv(gym.Wrapper):
         self.noop_action = 0
         assert env.unwrapped.get_action_meanings()[0] == 'NOOP'
 
+        self._max_episode_steps = env._max_episode_steps
+
     def reset(self, **kwargs):
         self.env.reset(**kwargs)
         if self.override_num_noops is not None:
@@ -41,6 +43,8 @@ class FireResetEnv(gym.Wrapper):
         assert env.unwrapped.get_action_meanings()[1] == 'FIRE'
         assert len(env.unwrapped.get_action_meanings()) >= 3
 
+        self._max_episode_steps = env._max_episode_steps
+
     def reset(self, **kwargs):
         self.env.reset(**kwargs)
         obs, _, done, _ = self.env.step(1)
@@ -61,6 +65,8 @@ class EpisodicLifeEnv(gym.Wrapper):
         self.lives = 0
         self.was_real_done = True
 
+        self._max_episode_steps = env._max_episode_steps
+
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
         self.was_real_done = done
@@ -79,11 +85,34 @@ class EpisodicLifeEnv(gym.Wrapper):
         return obs
 
 
+class StickyActions(gym.Wrapper):
+    def __init__(self, env, frame_skip):
+        gym.Wrapper.__init__(self, env)
+        self._skip = frame_skip
+
+        self._max_episode_steps = env._max_episode_steps
+
+    def step(self, action):
+        total_reward = 0.0
+        done = None
+        for i in range(self._skip):
+            obs, reward, done, info = self.env.step(action)
+            total_reward += reward
+            if done:
+                break
+        return obs, total_reward, done, info
+
+    def reset(self, **kwargs):
+        return self.env.reset(**kwargs)
+
+
 class MaxAndSkipEnv(gym.Wrapper):
     def __init__(self, env, frame_skip):
         gym.Wrapper.__init__(self, env)
         self.obs_buffer = np.zeros((2,)+env.observation_space.shape, dtype=np.uint8)
         self._skip = frame_skip
+
+        self._max_episode_steps = env._max_episode_steps
 
     def step(self, action):
         total_reward = 0.0
@@ -106,8 +135,12 @@ class MaxAndSkipEnv(gym.Wrapper):
 class ClipRewardEnv(gym.RewardWrapper):
     def __init__(self, env):
         gym.RewardWrapper.__init__(self, env)
+        self.original_reward = None
+
+        self._max_episode_steps = env._max_episode_steps
 
     def reward(self, reward):
+        self.original_reward = reward
         return np.sign(reward)
 
 
@@ -132,6 +165,8 @@ class WarpFrame(gym.ObservationWrapper):
         self.observation_space = new_space
         assert original_space.dtype == np.uint8 and len(original_space.shape) == 3
 
+        self._max_episode_steps = env._max_episode_steps
+
     def observation(self, obs):
         if self._grayscale:
             obs = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
@@ -149,6 +184,8 @@ class FrameActionStack(gym.Wrapper):
         self.frames = deque([], maxlen=self.k)
         shp = env.observation_space.shape
         self.observation_space = spaces.Box(low=0, high=255, shape=(shp[:-1] + (shp[-1] * self.k,)), dtype=env.observation_space.dtype)
+
+        self._max_episode_steps = env._max_episode_steps
 
     def reset(self):
         obs = self.env.reset()
@@ -172,13 +209,15 @@ class FrameActionStack(gym.Wrapper):
         return LazyFrames(list(self.frames))
 
 
-class FrameStack(gym.Wrapper):
+class AtariFrameStack(gym.Wrapper):
     def __init__(self, env, stack_frames):
         gym.Wrapper.__init__(self, env)
         self.k = stack_frames
         self.frames = deque([], maxlen=self.k)
         shp = env.observation_space.shape
         self.observation_space = spaces.Box(low=0, high=255, shape=(shp[:-1] + (shp[-1] * self.k,)), dtype=env.observation_space.dtype)
+
+        self._max_episode_steps = env._max_episode_steps
 
     def reset(self):
         obs = self.env.reset()
@@ -196,11 +235,13 @@ class FrameStack(gym.Wrapper):
         return LazyFrames(list(self.frames))
 
 
-class NonAtariFrameStack(gym.Wrapper):
+class FrameStack(gym.Wrapper):
     def __init__(self, env, stack_frames):
         gym.Wrapper.__init__(self, env)
         self.k = stack_frames
         self.frames = deque([], maxlen=self.k)
+
+        self._max_episode_steps = env._max_episode_steps
 
     def reset(self):
         obs = self.env.reset()
@@ -266,11 +307,23 @@ def wrap_atari(env, config):
         if config.stack_actions:
             env = FrameActionStack(env, config.stack_frames)
         else:
-            env = FrameStack(env, config.stack_frames)
+            env = AtariFrameStack(env, config.stack_frames)
+
+    if config.clip_rewards:
+            env = ClipRewardEnv(env)
 
     return env
 
 def wrap_game(env, config):
-    if config.stack_frames > 1:
-        env = NonAtariFrameStack(env, config.stack_frames)
+    if config.max_episode_steps is not None:
+        env._max_episode_steps = config.max_episode_steps
+    if config.wrap_atari:
+        env = wrap_atari(env, config)
+    else:
+        if config.stack_frames > 1:
+            env = FrameStack(env, config.stack_frames)
+        if config.sticky_actions > 1:
+            env = StickyActions(env, config.sticky_actions)
+        if config.clip_rewards:
+            env = ClipRewardEnv(env)
     return env

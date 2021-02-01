@@ -12,11 +12,11 @@ import ray
 @ray.remote(num_cpus=1)
 class Learner(Logger):
 
-  def __init__(self, config, storage, replay_buffer, state=None, run_tag=None, group_tag=None, date=None):
+  def __init__(self, config, storage, replay_buffer, state=None, run_tag=None, date=None):
     set_all_seeds(config.seed)
 
     self.run_tag = run_tag
-    self.group_tag = group_tag
+    self.group_tag = config.group_tag
     self.worker_id = 'learner'
     self.replay_buffer = replay_buffer
     self.storage = storage

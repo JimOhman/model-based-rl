@@ -1,4 +1,4 @@
-from atari_wrappers import wrap_atari, wrap_game
+from wrappers import wrap_game
 from torch.optim.lr_scheduler import ExponentialLR
 from torch.optim import RMSprop, Adam, SGD
 from torch.nn import MSELoss, LogSoftmax, SmoothL1Loss
@@ -11,10 +11,7 @@ import gym
 
 def get_environment(config):
     environment = gym.make(config.environment)
-    if config.wrap_atari:
-      environment = wrap_atari(environment, config)
-    else:
-      environment = wrap_game(environment, config)
+    environment = wrap_game(environment, config)
     return environment
 
 def get_network(config, device=None):
