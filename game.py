@@ -75,13 +75,15 @@ class Game(object):
     if self.step >= self.environment._max_episode_steps:
       done = False
 
+    self.done = done
+
     self.history.actions.append(action)
     self.history.dones.append(done)
     self.history.rewards.append(reward)
 
   def store_search_statistics(self, root):
     sum_visits = sum(child.visit_count for child in root.children)
-    self.history.child_visits.append([child.visit_count / sum_visits for child in root.children])
+    self.history.child_visits.append([child.visit_count/sum_visits for child in root.children])
     self.history.root_values.append(root.value())
 
   def get_observation(self, state_index):
@@ -92,5 +94,5 @@ class Game(object):
 
   def get_history_sequence(self, collect_from):
     history = self.history.get_slice(collect_from)
-    self.previous_collect_to = int(self.step / self.sticky_actions)
+    self.previous_collect_to = int(self.step/self.sticky_actions)
     return history

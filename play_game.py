@@ -1,15 +1,10 @@
-from utils import get_network, get_environment, set_all_seeds
-from config import make_config
-from mcts import MCTS, Node
-from copy import deepcopy
-from main import get_run_tag, config_generator
-from game import Game
-from logger import Logger
+from utils import get_environment
 from datetime import datetime
-import torch
+from game import Game
+import numpy as np
+import pickle
 import pytz
 import time
-import pickle
 import os
 
 
@@ -31,8 +26,7 @@ class HumanActor():
 
   def play_game(self):
     global human_agent_action
-
-    human_agent_action = 0
+    human_agent_action = self.config.default_action
 
     def key_press(key, mod):
       global human_agent_action
@@ -45,7 +39,7 @@ class HumanActor():
       a = int( key - ord('0') )
       if a <= 0 or a >= self.actions: return
       if human_agent_action == a:
-        human_agent_action = self.default_action
+        human_agent_action = self.config.default_action
 
     self.environment.reset()
     self.environment.render()
@@ -53,14 +47,18 @@ class HumanActor():
     self.environment.unwrapped.viewer.window.on_key_release = key_release
 
     histories = []
-    play = True
-    while play:
+    keep_playing = True
+    while keep_playing:
       game = Game(self.environment, self.config)
 
       initial_observation = self.environment.reset()
       game.history.observations.append(initial_observation)
 
       self.environment.render()
+
+      for t in reversed(range(1, 4)):
+        print("{}...".format(t))
+        time.sleep(1)
             
       skip_count = 0
       while not game.terminal:
@@ -88,11 +86,11 @@ class HumanActor():
             history = game.get_history_sequence(collect_from)
             self.replay_buffer.append(history)
 
-      keep_playing = input('Play another? (Y/n): ')
-      if keep_playing.capitalize() != 'N':
-        play = True
+      play_another = input('Play another? (Y/n): ')
+      if play_another.capitalize() != 'N':
+        keep_playing = True
       else:
-        play = False
+        keep_playing = False
 
     if self.config.save_buffer and self.replay_buffer:
       self.save_buffer()
@@ -138,8 +136,9 @@ if __name__ == '__main__':
   args.add_argument('--stack_frames', type=int, default=1)
   args.add_argument('--episode_life', action='store_true')
   args.add_argument('--clip_rewards', action='store_true')
-  args.add_argument('--sticky_actions', type=int, default=0)
+  args.add_argument('--sticky_actions', type=int, default=1)
   args.add_argument('--default_action', type=int, default=0)
+  args.add_argument('--max_episode_steps', type=int, default=None)
 
   config = args.parse_args()
 

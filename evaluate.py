@@ -1,6 +1,7 @@
 from mcts import MCTS, Node
 from utils import get_network, get_environment, set_all_seeds
 from visualize_mcts import write_mcts_as_png
+from matplotlib import animation
 from copy import deepcopy
 import matplotlib
 import matplotlib.pyplot as plt
@@ -161,6 +162,20 @@ class SummaryTools(object):
       ax.legend(framealpha=0.2, fontsize=8)
     return axes
 
+  def save_frames_as_gif(self, frames, path='./', filename='default.gif'):
+    plt.figure(figsize=(frames[0].shape[1]/72.0, frames[0].shape[0]/72.0), dpi=72)
+
+    patch = plt.imshow(frames[0])
+    plt.axis('off')
+
+    def animate(i):
+      patch.set_data(frames[i])
+
+    path_to_file = os.path.join(path, filename)
+    anim = animation.FuncAnimation(plt.gcf(), animate, frames=len(frames), interval=50)
+    anim.save(path_to_file, writer='imagemagick', fps=60)
+    plt.close()
+
 class Evaluator(SummaryTools):
 
     def __init__(self, state):
@@ -184,6 +199,12 @@ class Evaluator(SummaryTools):
         path_to_mcts_folder = os.path.join(path_to_mcts_folder, 'mcts')
         os.makedirs(path_to_mcts_folder, exist_ok=True)
 
+      if self.config.save_gif_as:
+        path_to_gif_folder = os.path.split(os.path.normpath(self.config.saves_dir))[0]
+        path_to_gif_folder = os.path.join(path_to_gif_folder, 'gifs')
+        os.makedirs(path_to_gif_folder, exist_ok=True)
+
+      frames = []
       game.pred_values = []
       game.pred_rewards = []
       game.search_depths = []
@@ -252,10 +273,11 @@ class Evaluator(SummaryTools):
 
           if self.config.render:
             try:
-              img = environment.obs_buffer.max(axis=0)
-              self.viewer.imshow(img)
+              frame = environment.obs_buffer.max(axis=0)
+              self.viewer.imshow(frame)
             except:
-              environment.render()
+              frame = environment.render(mode="rgb_array")
+            frames.append(frame)
 
           if game.terminal or game.step > self.config.max_steps:
             break
@@ -266,6 +288,10 @@ class Evaluator(SummaryTools):
                        np.round(np.sum(game.pred_rewards), 1),
                        np.round(np.mean(game.pred_values), 1),
                        np.round(np.mean(game.history.root_values), 1)))
+
+      if self.config.save_gif_as and frames:
+        filename = self.config.save_gif_as + '.gif'
+        self.save_frames_as_gif(frames, path_to_gif_folder, filename)
       return game
 
 def get_label(state, config, idx):
@@ -287,12 +313,10 @@ def get_label(state, config, idx):
       label = '{}'.format(state['step'])
     return label
 
-def get_states(config):
-  state_paths = [(saves_dir + net) for saves_dir in config.saves_dir for net in config.evaluate_nets]
-  states = []
+def state_generator(config):
   for idx, saves_dir in enumerate(config.saves_dir):
     for net in config.evaluate_nets:
-      meta_state = torch.load(saves_dir + net, map_location=torch.device('cpu'))
+      meta_state = torch.load(saves_dir+net, map_location=torch.device('cpu'))
       for temperature in config.eval_temperatures:
         for num_simulations in config.num_simulations:
           for only_prior in config.only_prior:
@@ -312,8 +336,8 @@ def get_states(config):
                   state['config'].label = get_label(state, config, idx)
                   state['config'].render = config.render
                   state['config'].save_mcts = config.save_mcts
-                  states.append(state)
-  return states
+                  state['config'].save_gif_as = config.save_gif_as
+                  yield state
 
 def run(evaluator, seed=None):
     environment = get_environment(evaluator.config)
@@ -347,19 +371,20 @@ if __name__ == '__main__':
     if config.parallel:
       ray.init()
 
-    states = get_states(config)
-
     evaluators = []
-    for state in states:
+    for state in state_generator(config):
       evaluators.append(Evaluator(state))
 
-    print("\n\033[92mStarting a {} episode evaluation of {} configurations\033[0m...".format(config.games_per_evaluation, len(states)))
+    info = (config.games_per_evaluation, len(evaluators))
+    print("\n\033[92mStarting a {} episode evaluation of {} configurations\033[0m...".format(*info))
     
     if config.plot_summary:
       axes = None
 
-    base_seed = config.seed[0] if config.seed[0] is not None else 0
-    seeds = range(base_seed, config.games_per_evaluation + base_seed)
+    if config.seed[0] is not None:
+      seeds = range(config.seed[0], config.games_per_evaluation + config.seed[0])
+    else:
+      seeds = [None] * config.games_per_evaluation
     
     for evaluator in evaluators:
       print("\n\033[92mEvaluating... - label: ({})\033[0m".format(evaluator.config.label))
@@ -377,4 +402,4 @@ if __name__ == '__main__':
     if config.plot_summary:
       wm = plt.get_current_fig_manager()
       wm.window.state('zoomed')
-      plt.show()
+      plt.show() 

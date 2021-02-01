@@ -210,6 +210,7 @@ def make_config():
   evaluation.add_argument('--smooth', type=int, default=0)
   evaluation.add_argument('--apply_mcts_steps', nargs='+', type=int, default=[1])
   evaluation.add_argument('--parallel', action='store_true')
+  evaluation.add_argument('--save_gif_as', type=str, default='')
 
   ### Inject human games
   injection = parser.add_argument_group('injection')
