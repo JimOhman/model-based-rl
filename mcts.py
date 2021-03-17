@@ -16,6 +16,8 @@ class MinMaxStats(object):
   def normalize(self, value: float) -> float:
     if self.maximum > self.minimum:
       return (value - self.minimum) / (self.maximum - self.minimum)
+    elif self.maximum == self.minimum:
+      return 1.0
     return value
 
   def reset(self, maximum_bound=None, minimum_bound=None):
@@ -52,7 +54,7 @@ class Node(object):
   def add_exploration_noise(self, dirichlet_alpha, exploration_fraction):
     noise = np.random.dirichlet([dirichlet_alpha] * len(self.children))
     for a, n in enumerate(noise):
-      self.children[a].prior = self.children[a].prior*(1 - exploration_fraction) + n*exploration_fraction
+      self.children[a].prior = self.children[a].prior*(1-exploration_fraction) + n*exploration_fraction
 
 
 class MCTS(object):
@@ -62,6 +64,7 @@ class MCTS(object):
     self.discount = config.discount
     self.pb_c_base = config.pb_c_base
     self.pb_c_init = config.pb_c_init
+    self.init_value_score = config.init_value_score
 
     self.min_max_stats = MinMaxStats()
 
@@ -78,9 +81,8 @@ class MCTS(object):
         search_path.append(node)
 
       parent = search_path[-2]
-      last_action = [action]
 
-      network_output = network.recurrent_inference(parent.hidden_state, last_action)
+      network_output = network.recurrent_inference(parent.hidden_state, [action])
       node.expand(network_output)
 
       self.backpropagate(search_path, network_output.value.item())
@@ -90,7 +92,7 @@ class MCTS(object):
 
   def select_child(self, node):
     if node.visit_count == 0:
-      action = np.random.randint(len(node.children))
+      action = np.argmax([child.prior for child in node.children])
     else:
       action = np.argmax([self.ucb_score(node, child) for child in node.children])
     child = node.children[action]
@@ -101,14 +103,15 @@ class MCTS(object):
     pb_c *= math.sqrt(parent.visit_count) / (child.visit_count + 1)
     prior_score = pb_c * child.prior
     if child.visit_count > 0:
-      value_score = self.min_max_stats.normalize(child.reward + self.discount * child.value())
+      value_score = self.min_max_stats.normalize(child.reward + self.discount*child.value())
     else:
-      value_score = 0.
+      value_score = self.init_value_score
     return prior_score + value_score
 
   def backpropagate(self, search_path, value):
     for idx, node in enumerate(reversed(search_path)):
       node.value_sum += value
       node.visit_count += 1
-      self.min_max_stats.update(node.reward + self.discount * node.value())
-      value = node.reward + self.discount * value
+      if idx < len(search_path) - 1:
+        self.min_max_stats.update(node.reward + self.discount*node.value())
+      value = node.reward + self.discount*value

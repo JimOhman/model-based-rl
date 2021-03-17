@@ -1,5 +1,7 @@
 from shared_storage import SharedStorage
 from replay_buffer import PrioritizedReplay
+from utils import get_environment
+import numpy as np
 from actors import Actor
 from learners import Learner
 from config import make_config
@@ -13,7 +15,7 @@ import ray
 
 
 def launch(config, run_tag, date):
-  ray.init()
+  ray.init(num_gpus=1)
 
   if config.load_state:
     state = torch.load(config.load_state)
@@ -22,6 +24,10 @@ def launch(config, run_tag, date):
   else:
     state = None
 
+  env = get_environment(config)
+  config.action_space = env.action_space.n
+  config.obs_space = env.observation_space.shape
+
   storage = SharedStorage.remote(config.num_actors)
   replay_buffer = PrioritizedReplay.remote(config)
 
@@ -29,21 +35,17 @@ def launch(config, run_tag, date):
   learner = Learner.remote(config, storage, replay_buffer, state, run_tag, date)
   workers = actors + [learner]
 
-  if config.inject_experiences_from is not None:
-    for path in config.inject_experiences_from:
-      with open('{}.pkl'.format(path), 'rb') as input:
-        histories = pickle.load(input)
-      for idx, history in enumerate(histories):
-        actor_idx = idx % len(actors)
-        actors[actor_idx].reanalyze_history.remote(history, keep_local=True)
-
   print("\n\033[92mStarting date: {}\033[0m".format(date))
   print("Using environment: {}.".format(config.environment))
   print("Using architecture: {}.".format(config.architecture))
-  print("Using replay memory with capacity: {}.".format(config.window_size))
+  print("Using replay memory with max capacity: {}.".format(config.window_size))
+  if config.window_step is not None:
+    print("   - with {} as step-size.".format(config.window_step))
   print("   - {} stored before learner starts.".format(config.stored_before_train))
   print("Using optimizer: {}.".format(config.optimizer))
   print("   - initial lr: {}.".format(config.lr_init))
+  if config.optimizer == 'SGD':
+    print("   - momentum: {}".format(config.momentum))
   if config.weight_decay:
     print("   - weight decay: {},".format(config.weight_decay))
   if config.lr_scheduler:
@@ -62,6 +64,7 @@ def launch(config, run_tag, date):
     print("Using {} as value and reward loss.".format(config.policy_loss))
   else:
     print("Using {} as value and reward loss.".format(config.scalar_loss))
+  print("Using batch size {}.".format(config.batch_size))
   print("Using discount {}.".format(config.discount))
   print("Using {} simulations per step.".format(config.num_simulations))
   print("Using td-steps {}.".format(config.td_steps))
@@ -73,6 +76,7 @@ def launch(config, run_tag, date):
 
   ray.get([worker.launch.remote() for worker in workers])
   ray.shutdown()
+
 
 def get_run_tag(meta_config, config, date):
   if meta_config.run_tag is None:
@@ -107,7 +111,6 @@ def config_generator(meta_config):
                 for num_simulations in meta_config.num_simulations:
                   for num_unroll_steps in meta_config.num_unroll_steps:
                     for td_steps in meta_config.td_steps:
-
 
                       config = deepcopy(meta_config)
 

@@ -1,6 +1,6 @@
 from wrappers import wrap_game
 from torch.optim.lr_scheduler import ExponentialLR
-from torch.optim import RMSprop, Adam, SGD
+from torch.optim import SGD, RMSprop, Adam, AdamW
 from torch.nn import MSELoss, LogSoftmax, SmoothL1Loss
 from networks import MuZeroNetwork, FCNetwork, TinyNetwork
 import numpy as np
@@ -32,7 +32,7 @@ def get_network(config, device=None):
         input_channels *= 2
       network = TinyNetwork(input_channels, action_space, device, config)
     elif config.architecture == 'FCNetwork':
-      input_dim = config.stack_frames * np.shape(env.observation_space)[0]
+      input_dim = np.prod(env.observation_space.shape)
       network = FCNetwork(input_dim, action_space, device, config)
     else:
       raise NotImplementedError
@@ -62,6 +62,8 @@ def get_optimizer(config, parameters):
       optimizer = RMSprop(parameters, lr=config.lr_init, momentum=config.momentum, eps=0.01, weight_decay=config.weight_decay)
     elif config.optimizer == 'Adam':
       optimizer = Adam(parameters, lr=config.lr_init, weight_decay=config.weight_decay, eps=0.00015)
+    elif config.optimizer == 'AdamW':
+      optimizer = AdamW(parameters, lr=config.lr_init, weight_decay=config.weight_decay, eps=0.00015)
     elif config.optimizer == 'SGD':
       optimizer = SGD(parameters, lr=config.lr_init, momentum=config.momentum, weight_decay=config.weight_decay)
     else:
@@ -77,13 +79,13 @@ class MuZeroLR():
     self.lr_decay_rate = config.lr_decay_rate
     self.lr_init = config.lr_init
     self.lr_step = 0
+    self.lr = self.lr_init
 
   def step(self):
     self.lr_step += 1
-    if self.lr_step <= self.lr_decay_steps:
-      lr = self.lr_init * self.lr_decay_rate ** (self.lr_step / self.lr_decay_steps)
-      for param_group in self.optimizer.param_groups:
-        param_group["lr"] = lr
+    self.lr = self.lr_init * self.lr_decay_rate ** (self.lr_step / self.lr_decay_steps)
+    for param_group in self.optimizer.param_groups:
+      param_group["lr"] = self.lr
 
 
 def get_lr_scheduler(config, optimizer):

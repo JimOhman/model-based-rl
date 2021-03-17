@@ -18,11 +18,6 @@ class Config(object):
       self.reward_support_range = list(range(self.reward_support_min, self.reward_support_max + 1))
       self.reward_support_size = len(self.reward_support_range)
 
-      if self.norm_states:
-        self.state_min = self.state_range[::2]
-        self.state_max = self.state_range[1::2]
-        self.state_range = list(np.array(self.state_max) - np.array(self.state_min))
-
   def inverse_reward_transform(self, reward_logits):
       return self.inverse_transform(reward_logits, self.reward_support_range)
 
@@ -53,15 +48,9 @@ class Config(object):
       else:
         return temp3
 
-  def to_torch(self, x, device, norm=False):
-    x = np.float32(x)
-    if norm:
-      x = (x - np.array(self.state_max, dtype=np.float32)) / np.array(self.state_range, dtype=np.float32)
-    return torch.from_numpy(x).to(device)
-
   @staticmethod
   def scalar_transform(x):
-      output = torch.sign(x) * (torch.sqrt(torch.abs(x) + 1) - 1) + 0.001 * x
+      output = torch.sign(x)*(torch.sqrt(torch.abs(x) + 1) - 1) + 0.001*x
       return output
 
   @staticmethod
@@ -79,14 +68,10 @@ class Config(object):
       return support
 
   @staticmethod
-  def to_numpy(x):
-    return x.detach().cpu().numpy()
-
-  @staticmethod
-  def select_action(node, temperature=0):
+  def select_action(node, temperature=0.):
       visit_counts = np.array([child.visit_count for child in node.children])
       if temperature:
-        distribution = np.array([visit_count**(1 / temperature) for visit_count in visit_counts])
+        distribution = visit_counts ** (1/temperature)
         distribution = distribution / sum(distribution)
         action = np.random.choice(len(visit_counts), p=distribution)
       else:
@@ -114,36 +99,39 @@ def make_config():
 
   # Environment Modifications
   environment_modifications = parser.add_argument_group('general environment modifications')
-  environment_modifications.add_argument('--scale_state', nargs='+', type=int, default=None)
   environment_modifications.add_argument('--clip_rewards', action='store_true')
-  environment_modifications.add_argument('--stack_frames', type=int, default=1)
+  environment_modifications.add_argument('--stack_states', type=int, default=1)
   environment_modifications.add_argument('--state_range', nargs='+', type=float, default=None)
   environment_modifications.add_argument('--norm_states', action='store_true')
   environment_modifications.add_argument('--max_episode_steps', type=int, default=None)
   environment_modifications.add_argument('--sticky_actions', type=int, default=1)
+  environment_modifications.add_argument('--episode_life', action='store_true')
+  environment_modifications.add_argument('--fire_reset', action='store_true')
+  environment_modifications.add_argument('--noop_reset', action='store_true')
+  environment_modifications.add_argument('--noop_max', type=int, default=30)
+  environment_modifications.add_argument('--avoid_repeat', action='store_true')
 
   atari = parser.add_argument_group('atari environment modifications')
   atari.add_argument('--wrap_atari', action='store_true')
-  atari.add_argument('--episode_life', action='store_true')
   atari.add_argument('--stack_actions', action='store_true')
   atari.add_argument('--frame_size', nargs='+', type=int, default=[96, 96])
-  atari.add_argument('--noop_max', type=int, default=30)
   atari.add_argument('--frame_skip', type=int, default=4)
 
   ### Self-Play
   self_play = parser.add_argument_group('self play')
-  self_play.add_argument('--num_actors', nargs='+', type=int, default=[8])
-  self_play.add_argument('--max_steps', type=int, default=27000)
-  self_play.add_argument('--num_simulations', nargs='+', type=int, default=[30])
-  self_play.add_argument('--max_history_length', type=int, default=300)
+  self_play.add_argument('--num_actors', nargs='+', type=int, default=[7])
+  self_play.add_argument('--max_steps', type=int, default=40000)
+  self_play.add_argument('--num_simulations', nargs='+', type=int, default=[None])
+  self_play.add_argument('--max_history_length', type=int, default=500)
   self_play.add_argument('--visit_softmax_temperatures', nargs='+', type=float, default=[1.0, 0.5, 0.25])
   self_play.add_argument('--visit_softmax_steps', nargs='+', type=int, default=[15e3, 30e3])
   self_play.add_argument('--fixed_temperatures', nargs='+', type=float, default=[])
 
-  # Root prior exploration noise.
+  # MCTS exploration terms
   exploration = parser.add_argument_group('exploration')
   exploration.add_argument('--root_dirichlet_alpha', type=float, default=0.25)
   exploration.add_argument('--root_exploration_fraction', type=float, default=0.25)
+  exploration.add_argument('--init_value_score', type=float, default=0.0)
 
   # UCB formula
   ucb = parser.add_argument_group('UCB formula')
@@ -153,7 +141,7 @@ def make_config():
   ### Prioritized Replay Buffer
   per = parser.add_argument_group('prioritized experience replay')
   per.add_argument('--window_size', nargs='+', type=int, default=[100000])
-  per.add_argument('--window_step', nargs='+', type=int, default=[10000])
+  per.add_argument('--window_step', nargs='+', type=int, default=[None])
   per.add_argument('--epsilon', type=float, default=0.01)
   per.add_argument('--alpha', type=float, default=1.)
   per.add_argument('--beta', type=float, default=1.)
@@ -161,32 +149,35 @@ def make_config():
 
   ### Training
   training = parser.add_argument_group('training')
-  training.add_argument('--training_steps', type=int, default=1000000)
+  training.add_argument('--training_steps', type=int, default=100000000)
   training.add_argument('--policy_loss', type=str, default='CrossEntropyLoss')
   training.add_argument('--scalar_loss', type=str, default='MSE')
   training.add_argument('--num_unroll_steps', nargs='+', type=int, default=[5])
-  training.add_argument('--checkpoint_frequency', type=int, default=100)
-  training.add_argument('--td_steps', nargs='+', type=int, default=[50])
-  training.add_argument('--batch_size', nargs='+', type=int, default=[32])
+  training.add_argument('--send_weights_frequency', type=int, default=500)
+  training.add_argument('--weight_sync_frequency', type=int, default=1000)
+  training.add_argument('--td_steps', nargs='+', type=int, default=[10])
+  training.add_argument('--batch_size', nargs='+', type=int, default=[256])
   training.add_argument('--batches_per_fetch', type=int, default=15)
-  training.add_argument('--stored_before_train', type=int, default=10000)
+  training.add_argument('--stored_before_train', type=int, default=50000)
   training.add_argument('--clip_grad', type=int, default=0)
   training.add_argument('--no_target_transform', action='store_true')
   training.add_argument('--sampling_ratio', type=float, default=0.)
   training.add_argument('--discount', nargs='+', type=float, default=[0.997])
   training.add_argument('--inject_experiences_from', nargs='+', type=str, default=None)
-  training.add_argument('--reanalyze_frequency', type=float, default=np.float('inf'))
+  training.add_argument('--revisit_frequency', type=float, default=np.float('inf'))
+  training.add_argument('--revisit', action='store_true')
+  training.add_argument('--use_q_max', action='store_true')
 
   # Optimizer
-  training.add_argument('--optimizer', type=str, default='Adam')
+  training.add_argument('--optimizer', type=str, default='AdamW')
   training.add_argument('--momentum', type=float, default=0.9)
   training.add_argument('--weight_decay', type=float, default=1e-4)
 
   # Learning rate scheduler
   training.add_argument('--lr_scheduler', type=str, default='')
-  training.add_argument('--lr_init', nargs='+', type=float, default=[0.005])
-  training.add_argument('--lr_decay_rate', type=float, default=0.05)
-  training.add_argument('--lr_decay_steps', type=int, default=20000)
+  training.add_argument('--lr_init', nargs='+', type=float, default=[0.0008])
+  training.add_argument('--lr_decay_rate', type=float, default=0.1)
+  training.add_argument('--lr_decay_steps', type=int, default=100000)
 
   ### Saving and Loading
   load_and_save = parser.add_argument_group('saving and loading')
@@ -211,10 +202,10 @@ def make_config():
   evaluation.add_argument('--apply_mcts_steps', nargs='+', type=int, default=[1])
   evaluation.add_argument('--parallel', action='store_true')
   evaluation.add_argument('--save_gif_as', type=str, default='')
-
-  ### Inject human games
-  injection = parser.add_argument_group('injection')
-  injection.add_argument('--histories_path', type=str, default=None)
+  evaluation.add_argument('--sleep', type=float, default=0)
+  evaluation.add_argument('--save_mcts', action='store_true')
+  evaluation.add_argument('--save_mcts_after_step', type=int, default=0)
+  evaluation.add_argument('--render', action='store_true')
 
   ### Logging
   logging = parser.add_argument_group('logging')
@@ -227,9 +218,7 @@ def make_config():
   ### Debugging
   debug = parser.add_argument_group('debugging')
   debug.add_argument('--debug', action='store_true')
-  debug.add_argument('--render', action='store_true')
   debug.add_argument('--verbose', nargs='+', type=str, default='')
-  debug.add_argument('--save_mcts', action='store_true')
 
   args = vars(parser.parse_args())
 

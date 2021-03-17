@@ -9,8 +9,10 @@ matplotlib.use("TkAgg")
 plt.style.use('dark_background')
 import numpy as np
 import torch
+import time
 import ray
 import random
+import sys
 import os
 
 
@@ -72,30 +74,30 @@ class SummaryTools(object):
 
   def print_summary(self, games):
     lengths = [game.step for game in games]
-    average_length, std_lengths = np.round(np.mean(lengths), 1), np.round(np.std(lengths), 1)
+    average_length, std_lengths = np.mean(lengths), np.std(lengths)
 
-    returns = [game.sum_rewards for game in games]
-    average_return, std_return = np.round(np.mean(returns), 1), np.round(np.std(returns), 1)
+    returns = [sum(game.history.rewards) for game in games]
+    average_return, std_return = np.mean(returns), np.std(returns)
 
     pred_returns = [sum(game.pred_rewards) for game in games]
-    average_pred_return, std_pred_return = np.round(np.mean(pred_returns), 1), np.round(np.std(pred_returns), 1)
+    average_pred_return, std_pred_return =np.mean(pred_returns), np.std(pred_returns)
 
     pred_values = [np.mean(game.pred_values) for game in games]
-    average_pred_value, std_pred_value = np.round(np.mean(pred_values), 1), np.round(np.std(pred_values), 1)
+    average_pred_value, std_pred_value = np.mean(pred_values), np.std(pred_values)
 
     root_values = [np.mean(game.history.root_values) for game in games]
-    average_root_value, std_root_value = np.round(np.mean(root_values), 1), np.round(np.std(root_values), 1)
+    average_root_value, std_root_value = np.mean(root_values), np.std(root_values)
 
-    search_depths = [np.mean(game.search_depths) for game in games]
-    average_search_depth, std_search_depth = np.round(np.mean(search_depths), 1), np.round(np.std(search_depths), 1)
+    search_depths = [np.mean(max(game.search_depths)) for game in games]
+    average_search_depth, std_search_depth = np.mean(search_depths), np.std(search_depths)
 
     print("\n\033[92mEvaluation finished! - label: ({})\033[0m".format(self.config.label))
-    print("   Average length: {}({})".format(average_length, std_lengths))
-    print("   Average return: {}({})".format(average_return, std_return))
-    print("   Average predicted return: {}({})".format(average_pred_return, std_pred_return))
-    print("   Average predicted value: {}({})".format(average_pred_value, std_pred_value))
-    print("   Average mcts value: {}({})".format(average_root_value, std_root_value))
-    print("   Average search depth: {}({})\n".format(average_search_depth, std_search_depth))
+    print("   Average length: {:.1f}({:.1f})".format(average_length, std_lengths))
+    print("   Average return: {:.1f}({:.1f})".format(average_return, std_return))
+    print("   Average predicted return: {:.1f}({:.1f})".format(average_pred_return, std_pred_return))
+    print("   Average predicted value: {:.1f}({:.1f})".format(average_pred_value, std_pred_value))
+    print("   Average mcts value: {:.1f}({:.1f})".format(average_root_value, std_root_value))
+    print("   Average search depth: {:.1f}({:.1f})\n".format(average_search_depth, std_search_depth))
 
   def get_quantiles(self, values, smooth=0):
       max_len = len(max(values, key=len))
@@ -104,21 +106,20 @@ class SummaryTools(object):
       upper = np.quantile(extended, 0.75, axis=1)
       lower = np.quantile(extended, 0.25, axis=1)
       if smooth:
-          center = self.moving_average(center, size=smooth)
-          upper = self.moving_average(upper, size=smooth)
-          lower = self.moving_average(lower, size=smooth)
+        center = self.moving_average(center, size=smooth)
+        upper = self.moving_average(upper, size=smooth)
+        lower = self.moving_average(lower, size=smooth)
       quantiles = {'0.5': center, '0.75': upper, '0.25': lower}
       return quantiles
 
   def get_axes(self, config):
-    labels = ['Return', 'Pred Return', 'Value', 
+    labels = ['Return', 'Pred Return', 'Value',
               'Pred Value', 'MCTS Value', 'Search Depth']
     if config.include_policy:
       labels.append('Policy')
-    n_subplots = len(labels)
     axes = []
     for i, label in enumerate(labels):
-      ax = plt.subplot2grid((n_subplots, 1), (i, 0))
+      ax = plt.subplot2grid((len(labels), 1), (i, 0))
       ax.set_ylabel(label, color='white', fontsize=13)
       ax.tick_params(colors='white', labelsize=9)
       ax.grid(alpha=0.3)
@@ -127,35 +128,62 @@ class SummaryTools(object):
     plt.subplots_adjust(hspace=0.4)
     return axes
 
+  def get_values(self, dones, rewards):
+    values = []
+    longest_game = max(map(len, rewards))
+    discounts = [self.config.discount**n for n in range(longest_game)]
+    for life_loss, rews in zip(dones, rewards):
+      life_loss_idxs, = np.where(np.array(life_loss)==True)
+      vals = []
+      if not len(life_loss_idxs):
+        life_loss_idxs = [len(rews) - 1]
+      step = 0
+      life_loss_idx = life_loss_idxs[step]
+      for i in range(len(rews)):
+        if life_loss_idx < i:
+          step = min(step + 1, len(life_loss_idxs) - 1)
+        life_loss_idx = life_loss_idxs[step]
+        r = rews[i:life_loss_idx + 1]
+        d = discounts[:len(r)]
+        vals.append(np.dot(r, d))
+      values.append(vals)
+    return values
+
   def plot_summary(self, games, config, axes=None):
     axes = self.get_axes(config) if axes is None else axes
 
-    rewards = [game.history.rewards for game in games]
+    if config.clip_rewards:
+      rewards = [np.sign(game.history.rewards) for game in games]
+    else:
+      rewards = [game.history.rewards for game in games]
+
     pred_rewards = [game.pred_rewards for game in games]
+
+    dones = [game.history.dones for game in games]
+    values = self.get_values(dones, rewards)
 
     returns = [np.cumsum(rews) for rews in rewards]
     pred_returns = [np.cumsum(rews) for rews in pred_rewards]
 
-    discounts = [self.config.discount**n for n in range(max(map(len, rewards)))]
-    values = []
-    for rews in rewards:
-      steps = len(rews)
-      values.append([np.dot(rews[i:], discounts[:steps-i]) for i in range(steps)])
     pred_values = [game.pred_values for game in games]
     mcts_values = [game.history.root_values for game in games]
-    search_depths = [game.search_depths for game in games]
+    search_depths = [np.max(game.search_depths, axis=1) for game in games]
 
-    data = [returns, pred_returns, values, pred_values, mcts_values, search_depths]
-    data_quantiles = [[self.config.label, self.get_quantiles(d, config.smooth)] for d in data]
+    datas = [[self.config.label, self.get_quantiles(returns, config.smooth)],
+             [self.config.label, self.get_quantiles(pred_returns, config.smooth)],
+             [self.config.label, self.get_quantiles(values, config.smooth)],
+             [self.config.label, self.get_quantiles(pred_values, config.smooth)],
+             [self.config.label, self.get_quantiles(mcts_values, config.smooth)],
+             [self.config.label, self.get_quantiles(search_depths, config.smooth)]]
 
     if config.include_policy:
       policy = list(zip(*[zip(*game.history.child_visits) for game in games]))
-      for i, action in enumerate(policy):
+      for i, prob_action in enumerate(policy):
         label = '{} - action: {}'.format(self.config.label, i)
-        data_quantiles.append([label, self.get_quantiles(action, config.smooth)])
-      axes.extend([axes[-1]] * len(policy))
+        datas.append([label, self.get_quantiles(prob_action, config.smooth)])
+        axes.append(axes[-1])
 
-    for ax, [label, quantiles] in zip(axes, data_quantiles):
+    for ax, [label, quantiles] in zip(axes, datas):
       ax.plot(quantiles['0.5'], linewidth=2, label=label)
       if config.include_bounds:
         ax.fill_between(range(len(quantiles['0.5'])), y1=quantiles['0.25'], y2=quantiles['0.75'], alpha=0.4)
@@ -176,6 +204,7 @@ class SummaryTools(object):
     anim.save(path_to_file, writer='imagemagick', fps=60)
     plt.close()
 
+
 class Evaluator(SummaryTools):
 
     def __init__(self, state):
@@ -190,6 +219,11 @@ class Evaluator(SummaryTools):
 
         if self.config.render:
           self.viewer = ImageViewer()
+
+        if self.config.norm_states:
+          self.obs_min = np.array(self.config.state_range[::2], dtype=np.float32)
+          self.obs_max = np.array(self.config.state_range[1::2], dtype=np.float32)
+          self.obs_range = self.obs_max - self.obs_min
 
     def play_game(self, environment, device):
       game = self.config.new_game(environment)
@@ -208,86 +242,99 @@ class Evaluator(SummaryTools):
       game.pred_values = []
       game.pred_rewards = []
       game.search_depths = []
-      while not game.terminal and game.step < self.config.max_steps:
+      while not game.terminal:
         root = Node(0)
 
-        current_observation = self.config.to_torch(game.get_observation(-1), device, norm=self.config.norm_states).unsqueeze(0)
-        initial_inference = self.network.initial_inference(current_observation)
+        current_observation = np.float32(game.get_observation(-1))
+        if self.config.norm_states:
+          current_observation = (current_observation - self.obs_min) / self.obs_range
+        current_observation = torch.from_numpy(current_observation).to(device)
 
+        initial_inference = self.network.initial_inference(current_observation.unsqueeze(0))
+        
         root.expand(network_output=initial_inference)
 
         if self.config.use_exploration_noise:
           root.add_exploration_noise(self.config.root_dirichlet_alpha, self.config.root_exploration_fraction)
 
-        actions = []
-        rewards = []
+        actions_to_apply, corresponding_rewards = [], []
         if self.config.only_prior:
           action = np.argmax([child.prior for child in root.children])
-          reward = self.network.recurrent_inference(root.hidden_state, [action]).reward.item()
-
-          actions.append(action)
-          rewards.append(reward)
-
+          reward = self.network.recurrent_inference(root.hidden_state, [action]).reward
+          actions_to_apply.append(action)
+          corresponding_rewards.append(reward)
           root.children[action].visit_count += 1
-          game.search_depths.append(0)
+          game.search_depths.append([0])
+
         elif self.config.only_value:
-          outputs = [self.network.recurrent_inference(root.hidden_state, [action]) for action in range(len(root.children))]
-          action = np.argmax([out.reward.item() + self.config.discount * out.value.item() for out in outputs])
-          reward = outputs[action].reward.item()
+          pred_rewards = []
+          q_values = []
 
-          actions.append(action)
-          rewards.append(reward)
-          
-          root.children[action].visit_count += 1
-          game.search_depths.append(1)
+          for action in range(len(root.children)):
+            output = self.network.recurrent_inference(root.hidden_state, [action])
+            pred_rewards.append(output.reward)
+            q_values.append(output.reward + self.config.discount * output.value)
+            root.children[action].visit_count += 1
+
+          action = np.argmax(q_values)
+          reward = pred_rewards[action]
+          actions_to_apply.append(action)
+          corresponding_rewards.append(reward)
+          game.search_depths.append([1])
+
         else:
-          mcts = self.mcts.run(root, self.network)
+          search_paths = self.mcts.run(root, self.network)
+          search_depths = [len(search_path) for search_path in search_paths]
+          game.search_depths.append(search_depths)
 
-          if self.config.save_mcts:
-            path_to_file = os.path.join(path_to_mcts_folder, str(game.step)+'.png')
-            write_mcts_as_png(mcts, path_to_file=path_to_file)
-
-          game.search_depths.append(max(map(len, mcts)) - 1)
+          if self.config.save_mcts and game.step >= self.config.save_mcts_after_step:
+            path_to_file = os.path.join(path_to_mcts_folder, str(game.step) + '.png')
+            write_mcts_as_png(search_paths, path_to_file=path_to_file)
 
           node = root
-          times_applied = 0
+          steps_applied = 0
           while node.expanded():
             action = self.config.select_action(root, temperature=self.config.temperature)
             reward = node.children[action].reward
-
-            actions.append(action)
-            rewards.append(reward)
+            actions_to_apply.append(action)
+            corresponding_rewards.append(reward)
 
             node = node.children[action]
-            times_applied += 1
+            steps_applied += 1
 
-            if times_applied == self.config.apply_mcts_steps:
+            if steps_applied == self.config.apply_mcts_steps:
               break
 
         game.pred_values.append(initial_inference.value.item())
         game.store_search_statistics(root)
 
-        for action, reward in zip(actions, rewards):
-          game.apply(action)
+        for action, reward in zip(actions_to_apply, corresponding_rewards):
           game.pred_rewards.append(reward)
+          game.apply(action)
+
+          if game.history.rewards[-1] != 0:
+            prev_reward_step = game.step
 
           if self.config.render:
             try:
-              frame = environment.obs_buffer.max(axis=0)
+              frame = game.environment.unwrapped._get_image()
               self.viewer.imshow(frame)
             except:
-              frame = environment.render(mode="rgb_array")
+              frame = game.environment.render(mode='rgb_array')
             frames.append(frame)
 
-          if game.terminal or game.step > self.config.max_steps:
+            if self.config.sleep:
+              time.sleep(self.config.sleep)
+
+          if game.terminal or game.step >= self.config.max_steps:
+            environment.was_real_done = True
+            game.terminal = True
             break
 
       msg = "\033[92m[Game done]\033[0m --> "
-      msg += "length: {}, return: {}, pred return: {}, pred value: {}, mcts value: {}"
-      print(msg.format(game.step, np.round(game.sum_rewards, 1),
-                       np.round(np.sum(game.pred_rewards), 1),
-                       np.round(np.mean(game.pred_values), 1),
-                       np.round(np.mean(game.history.root_values), 1)))
+      msg += "length: {:.1f}, return: {:.1f}, pred return: {:.1f}, pred value: {:.1f}, mcts value: {:.1f}"
+      print(msg.format(game.step, np.sum(game.history.rewards), np.sum(game.pred_rewards),
+                       np.mean(game.pred_values), np.mean(game.history.root_values)))
 
       if self.config.save_gif_as and frames:
         filename = self.config.save_gif_as + '.gif'
@@ -296,8 +343,7 @@ class Evaluator(SummaryTools):
 
 def get_label(state, config, idx):
     if config.detailed_label:
-      label = 'path:{}'.format(idx)
-      label += ', net:{}'.format(state['step'])
+      label = 'path:{}, net:{}'.format(idx, state['step'])
       if state['config'].only_value:
         label += ', only value'
       elif state['config'].only_prior:
@@ -313,6 +359,10 @@ def get_label(state, config, idx):
       label = '{}'.format(state['step'])
     return label
 
+def make_backwards_compatible(config):
+  if not hasattr(config, 'avoid_repeat'):
+    config.avoid_repeat = False
+
 def state_generator(config):
   for idx, saves_dir in enumerate(config.saves_dir):
     for net in config.evaluate_nets:
@@ -325,24 +375,32 @@ def state_generator(config):
                 for apply_mcts_steps in config.apply_mcts_steps:
                   if only_prior is True and only_value is True:
                     continue
+
                   state = deepcopy(meta_state)
                   state['config'].saves_dir = saves_dir
-                  state['config'].num_simulations = num_simulations
+                  if num_simulations is not None:
+                    state['config'].num_simulations = num_simulations
                   state['config'].temperature = temperature
                   state['config'].only_value = only_value
                   state['config'].only_prior = only_prior
                   state['config'].use_exploration_noise = use_exploration_noise
                   state['config'].apply_mcts_steps = apply_mcts_steps
-                  state['config'].label = get_label(state, config, idx)
                   state['config'].render = config.render
                   state['config'].save_mcts = config.save_mcts
+                  state['config'].save_mcts_after_step = config.save_mcts_after_step
                   state['config'].save_gif_as = config.save_gif_as
+                  state['config'].sleep = config.sleep
+                  state['config'].label = get_label(state, config, idx)
+
+                  make_backwards_compatible(state['config'])
+
                   yield state
 
 def run(evaluator, seed=None):
     environment = get_environment(evaluator.config)
     if seed is not None:
       environment.seed(seed)
+      set_all_seeds(seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     with torch.no_grad():
@@ -364,7 +422,8 @@ if __name__ == '__main__':
     import cv2
     from pyglet.gl import *
 
-    os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
+    import os
+    os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
     config = make_config()
 

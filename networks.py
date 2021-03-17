@@ -55,32 +55,43 @@ class FCRepresentation(nn.Module):
 
     def __init__(self, input_dim):
         super(FCRepresentation, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 100)
-        self.out = nn.Linear(100, 50)
+
+        hidden_dim = 50
+
+        self.fc1 = nn.Linear(input_dim, 512)
+        self.out = nn.Linear(512, hidden_dim)
 
     def forward(self, x):
-        x = torch.tanh(self.fc1(x))
-        return torch.tanh(self.out(x))
+        batch_size = x.shape[0]
+        x = x.view(batch_size, -1)
+        x = F.relu(self.fc1(x))
+        return F.relu(self.out(x))
 
 
 class FCDynamicsState(nn.Module):
 
     def __init__(self, input_dim, action_space):
         super(FCDynamicsState, self).__init__()
-        self.fc1 = nn.Linear(50+action_space, 100)
-        self.out = nn.Linear(100, 50)
+
+        self.hidden_dim = 50
+
+        self.fc1 = nn.Linear(self.hidden_dim+action_space, 512)
+        self.out = nn.Linear(512, self.hidden_dim)
 
     def forward(self, x):
-        x = torch.tanh(self.fc1(x))
-        return torch.tanh(self.out(x))
+        x = F.relu(self.fc1(x))
+        return F.relu(self.out(x))
 
 
 class FCDynamicsReward(nn.Module):
 
     def __init__(self, input_dim, action_space, reward_support_size):
         super(FCDynamicsReward, self).__init__()
-        self.fc1 = nn.Linear(50+action_space, 100)
-        self.reward = nn.Linear(100, reward_support_size)
+
+        hidden_dim = 50
+
+        self.fc1 = nn.Linear(hidden_dim+action_space, 512)
+        self.reward = nn.Linear(512, reward_support_size)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
@@ -91,8 +102,11 @@ class FCPredictionValue(nn.Module):
 
     def __init__(self, input_dim, value_support_size):
         super(FCPredictionValue, self).__init__()
-        self.fc1 = nn.Linear(50, 100)
-        self.value = nn.Linear(100, value_support_size)
+
+        hidden_dim = 50
+        
+        self.fc1 = nn.Linear(hidden_dim, 512)
+        self.value = nn.Linear(512, value_support_size)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
@@ -103,8 +117,11 @@ class FCPredictionPolicy(nn.Module):
 
     def __init__(self, input_dim, action_space):
         super(FCPredictionPolicy, self).__init__()
-        self.fc1 = nn.Linear(50, 100)
-        self.policy = nn.Linear(100, action_space)
+
+        hidden_dim = 50
+        
+        self.fc1 = nn.Linear(hidden_dim, 512)
+        self.policy = nn.Linear(512, action_space)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
@@ -116,7 +133,12 @@ class FCNetwork(BaseNetwork):
     def __init__(self, input_dim, action_space, device, config):
         super(FCNetwork, self).__init__()
         self.device = device
+
+        self.no_support = config.no_support
         self.action_space = action_space
+
+        self.inverse_reward_transform = config.inverse_reward_transform
+        self.inverse_value_transform = config.inverse_value_transform
 
         value_out = config.value_support_size if not config.no_support else 1
         reward_out = config.reward_support_size if not config.no_support else 1
@@ -126,13 +148,6 @@ class FCNetwork(BaseNetwork):
         self.reward_head = FCDynamicsReward(input_dim, action_space, reward_out)
         self.transition_head = FCDynamicsState(input_dim, action_space)
         self.to(device)
-
-        self.inverse_reward_transform = config.inverse_reward_transform
-        self.inverse_value_transform = config.inverse_value_transform
-
-        self.no_support = config.no_support
-
-        self.scale = True if config.scale_state is not None else False
 
     def representation(self, observation):
         hidden_state = self.representation_head(observation)
@@ -157,17 +172,17 @@ class FCNetwork(BaseNetwork):
 
     def attach_action(self, hidden_state, action):
         batch_size = np.shape(action)[0]
-        action = np.array(action)[:, np.newaxis]
-        a = torch.tensor(action, dtype=torch.int64, device=self.device)
+        action = np.array(action, dtype=np.int64)[:, np.newaxis]
+        a = torch.from_numpy(action).to(self.device)
         one_hot = torch.zeros((batch_size, self.action_space), dtype=torch.float32, device=self.device)
         one_hot.scatter_(1, a, 1.0)
         hidden_state = torch.cat((hidden_state, one_hot), dim=1)
         return hidden_state
 
     def scale_state(self, state):
-        if self.scale:
-            Min = state.min()
-            state = (state - Min) / (state.max() - Min)
+        _min = state.min(dim=1, keepdim=True)[0]
+        _max = state.max(dim=1, keepdim=True)[0]
+        state = (state - _min) / (_max - _min)
         return state
 
     def load_weights(self, weights):
@@ -239,7 +254,7 @@ class MuZeroDynamics(nn.Module):
         self.bn = nn.BatchNorm2d(128)
         self.resblocks = nn.ModuleList([ResidualBlock(128) for _ in range(16)])
 
-        self.fc1 = nn.Linear(6 * 6 * 128, reward_support_size)
+        self.fc1 = nn.Linear(6 * 6 * 128, 512)
         self.fc2 = nn.Linear(512, reward_support_size)
 
     def forward(self, x):
@@ -251,7 +266,7 @@ class MuZeroDynamics(nn.Module):
             out = block(out)
         state = out
         reward = F.relu(self.fc1(out.view(batch_size, -1)))
-        reward = self.fc1(out.view(batch_size, -1))
+        reward = self.fc2(out.view(batch_size, -1))
         return state, reward
 
 
@@ -288,6 +303,7 @@ class MuZeroNetwork(BaseNetwork):
     def __init__(self, input_channels, action_space, device, config):
         super(MuZeroNetwork, self).__init__()
         self.device = device
+        self.no_support = config.no_support
         self.action_space = action_space
 
         self.representation_head = MuZeroRepresentation(input_channels)
@@ -297,8 +313,6 @@ class MuZeroNetwork(BaseNetwork):
 
         self.inverse_reward_transform = config.inverse_reward_transform
         self.inverse_value_transform = config.inverse_value_transform
-
-        self.no_support = config.no_support
 
     def representation(self, observation):
         hidden_state = self.representation_head(observation)
@@ -328,8 +342,9 @@ class MuZeroNetwork(BaseNetwork):
         return hidden_state
 
     def scale_state(self, state):
-        Min = state.min()
-        state = (state - Min) / (state.max() - Min)
+        _min = state.min(dim=1, keepdim=True)[0]
+        _max = state.max(dim=1, keepdim=True)[0]
+        state = (state - _min) / (_max - _min)
         return state
 
     def load_weights(self, weights):
@@ -445,6 +460,7 @@ class TinyNetwork(BaseNetwork):
         super(TinyNetwork, self).__init__()
         self.device = device
 
+        self.no_support = config.no_support
         self.action_space = action_space
         value_output_dim = config.value_support_size if not config.no_support else 1
         reward_output_dim = config.reward_support_size if not config.no_support else 1
@@ -459,7 +475,6 @@ class TinyNetwork(BaseNetwork):
         self.inverse_reward_transform = config.inverse_reward_transform
         self.inverse_value_transform = config.inverse_value_transform
 
-        self.no_support = config.no_support
 
     def representation(self, observation):
         hidden_state = self.representation_head(observation)
@@ -491,8 +506,9 @@ class TinyNetwork(BaseNetwork):
         return hidden_state
 
     def scale_state(self, state):
-        Min = state.min()
-        state = (state - Min) / (state.max() - Min)
+        _min = state.min(dim=1, keepdim=True)[0]
+        _max = state.max(dim=1, keepdim=True)[0]
+        state = (state - _min) / (_max - _min)
         return state
 
     def load_weights(self, weights):

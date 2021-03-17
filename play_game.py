@@ -6,6 +6,7 @@ import pickle
 import pytz
 import time
 import os
+from copy import deepcopy
 
 
 class HumanActor():
@@ -59,7 +60,7 @@ class HumanActor():
       for t in reversed(range(1, 4)):
         print("{}...".format(t))
         time.sleep(1)
-            
+      
       skip_count = 0
       while not game.terminal:
 
@@ -139,6 +140,13 @@ if __name__ == '__main__':
   args.add_argument('--sticky_actions', type=int, default=1)
   args.add_argument('--default_action', type=int, default=0)
   args.add_argument('--max_episode_steps', type=int, default=None)
+
+  args.add_argument('--fire_reset', action='store_true')
+  args.add_argument('--noop_reset', action='store_true')
+  args.add_argument('--noop_max', type=int, default=30)
+
+  args.add_argument('--revisit', action='store_true')
+  args.add_argument('--use_q_max', action='store_true')
 
   config = args.parse_args()
 

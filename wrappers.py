@@ -8,6 +8,21 @@ import cv2
 cv2.ocl.setUseOpenCL(False)
 
 
+class ExposeTimeLimit(gym.Wrapper):
+    def __init__(self, env):
+        gym.Wrapper.__init__(self, env)
+
+        self._max_episode_steps = self.env._max_episode_steps
+
+    @property
+    def _elapsed_steps(self):
+        return self.env._elapsed_steps
+
+    @_elapsed_steps.setter
+    def _elapsed_steps(self, steps):
+        self.env._elapsed_steps = steps
+
+
 class NoopResetEnv(gym.Wrapper):
     def __init__(self, env, noop_max):
         gym.Wrapper.__init__(self, env)
@@ -16,7 +31,15 @@ class NoopResetEnv(gym.Wrapper):
         self.noop_action = 0
         assert env.unwrapped.get_action_meanings()[0] == 'NOOP'
 
-        self._max_episode_steps = env._max_episode_steps
+        self._max_episode_steps = self.env._max_episode_steps
+
+    @property
+    def _elapsed_steps(self):
+        return self.env._elapsed_steps
+
+    @_elapsed_steps.setter
+    def _elapsed_steps(self, steps):
+        self.env._elapsed_steps = steps
 
     def reset(self, **kwargs):
         self.env.reset(**kwargs)
@@ -43,7 +66,23 @@ class FireResetEnv(gym.Wrapper):
         assert env.unwrapped.get_action_meanings()[1] == 'FIRE'
         assert len(env.unwrapped.get_action_meanings()) >= 3
 
-        self._max_episode_steps = env._max_episode_steps
+        self._max_episode_steps = self.env._max_episode_steps
+
+    @property
+    def _elapsed_steps(self):
+        return self.env._elapsed_steps
+
+    @_elapsed_steps.setter
+    def _elapsed_steps(self, steps):
+        self.env._elapsed_steps = steps
+
+    @property
+    def was_real_done(self):
+        return self.env.was_real_done
+
+    @was_real_done.setter
+    def was_real_done(self, was_real_done):
+        self.env.was_real_done = was_real_done
 
     def reset(self, **kwargs):
         self.env.reset(**kwargs)
@@ -65,14 +104,24 @@ class EpisodicLifeEnv(gym.Wrapper):
         self.lives = 0
         self.was_real_done = True
 
-        self._max_episode_steps = env._max_episode_steps
+        self._max_episode_steps = self.env._max_episode_steps
+
+    @property
+    def _elapsed_steps(self):
+        return self.env._elapsed_steps
+
+    @_elapsed_steps.setter
+    def _elapsed_steps(self, steps):
+        self.env._elapsed_steps = steps
 
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
         self.was_real_done = done
         lives = self.env.unwrapped.ale.lives()
+
         if lives < self.lives and lives > 0:
             done = True
+
         self.lives = lives
         return obs, reward, done, info
 
@@ -85,12 +134,50 @@ class EpisodicLifeEnv(gym.Wrapper):
         return obs
 
 
+class EpisodicLifeEnvPong(gym.Wrapper):
+    def __init__(self, env):
+        gym.Wrapper.__init__(self, env)
+        self.was_real_done = True
+
+        self._max_episode_steps = self.env._max_episode_steps
+
+    @property
+    def _elapsed_steps(self):
+        return self.env._elapsed_steps
+
+    @_elapsed_steps.setter
+    def _elapsed_steps(self, steps):
+        self.env._elapsed_steps = steps
+
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+        self.was_real_done = done
+        if reward == -1:
+            done = True
+        return obs, reward, done, info
+
+    def reset(self, **kwargs):
+        if self.was_real_done:
+            obs = self.env.reset(**kwargs)
+        else:
+            obs, _, _, _ = self.env.step(0)
+        return obs
+
+
 class StickyActions(gym.Wrapper):
     def __init__(self, env, frame_skip):
         gym.Wrapper.__init__(self, env)
         self._skip = frame_skip
 
-        self._max_episode_steps = env._max_episode_steps
+        self._max_episode_steps = self.env._max_episode_steps
+
+    @property
+    def _elapsed_steps(self):
+        return self.env._elapsed_steps
+
+    @_elapsed_steps.setter
+    def _elapsed_steps(self, steps):
+        self.env._elapsed_steps = steps
 
     def step(self, action):
         total_reward = 0.0
@@ -105,14 +192,21 @@ class StickyActions(gym.Wrapper):
     def reset(self, **kwargs):
         return self.env.reset(**kwargs)
 
-
 class MaxAndSkipEnv(gym.Wrapper):
     def __init__(self, env, frame_skip):
         gym.Wrapper.__init__(self, env)
         self.obs_buffer = np.zeros((2,)+env.observation_space.shape, dtype=np.uint8)
         self._skip = frame_skip
 
-        self._max_episode_steps = env._max_episode_steps
+        self._max_episode_steps = self.env._max_episode_steps
+
+    @property
+    def _elapsed_steps(self):
+        return self.env._elapsed_steps
+
+    @_elapsed_steps.setter
+    def _elapsed_steps(self, steps):
+        self.env._elapsed_steps = steps
 
     def step(self, action):
         total_reward = 0.0
@@ -135,12 +229,28 @@ class MaxAndSkipEnv(gym.Wrapper):
 class ClipRewardEnv(gym.RewardWrapper):
     def __init__(self, env):
         gym.RewardWrapper.__init__(self, env)
-        self.original_reward = None
+        self.last_reward = None
 
-        self._max_episode_steps = env._max_episode_steps
+        self._max_episode_steps = self.env._max_episode_steps
+
+    @property
+    def _elapsed_steps(self):
+        return self.env._elapsed_steps
+
+    @_elapsed_steps.setter
+    def _elapsed_steps(self, steps):
+        self.env._elapsed_steps = steps
+
+    @property
+    def was_real_done(self):
+        return self.env.was_real_done
+
+    @was_real_done.setter
+    def was_real_done(self, was_real_done):
+        self.env.was_real_done = was_real_done
 
     def reward(self, reward):
-        self.original_reward = reward
+        self.last_reward = reward
         return np.sign(reward)
 
 
@@ -165,15 +275,21 @@ class WarpFrame(gym.ObservationWrapper):
         self.observation_space = new_space
         assert original_space.dtype == np.uint8 and len(original_space.shape) == 3
 
-        self._max_episode_steps = env._max_episode_steps
+        self._max_episode_steps = self.env._max_episode_steps
+
+    @property
+    def _elapsed_steps(self):
+        return self.env._elapsed_steps
+
+    @_elapsed_steps.setter
+    def _elapsed_steps(self, steps):
+        self.env._elapsed_steps = steps
 
     def observation(self, obs):
         if self._grayscale:
             obs = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
             obs = np.expand_dims(obs, -1)
-
         obs = cv2.resize(obs, (self._width, self._height), interpolation=cv2.INTER_AREA)
-
         return obs
 
 
@@ -183,9 +299,17 @@ class FrameActionStack(gym.Wrapper):
         self.k = 2 * stack_frames
         self.frames = deque([], maxlen=self.k)
         shp = env.observation_space.shape
-        self.observation_space = spaces.Box(low=0, high=255, shape=(shp[:-1] + (shp[-1] * self.k,)), dtype=env.observation_space.dtype)
+        self.observation_space = spaces.Box(low=0, high=255, shape=(self.k, *shp[:-1]), dtype=env.observation_space.dtype)
 
-        self._max_episode_steps = env._max_episode_steps
+        self._max_episode_steps = self.env._max_episode_steps
+
+    @property
+    def _elapsed_steps(self):
+        return self.env._elapsed_steps
+
+    @_elapsed_steps.setter
+    def _elapsed_steps(self, steps):
+        self.env._elapsed_steps = steps
 
     def reset(self):
         obs = self.env.reset()
@@ -198,8 +322,7 @@ class FrameActionStack(gym.Wrapper):
 
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
-        num_actions = self.env.action_space.n
-        act_plane = np.full_like(obs, 255*(action/num_actions), dtype=np.uint8)
+        act_plane = np.full_like(obs, 255*(action/self.env.action_space.n), dtype=np.uint8)
         self.frames.append(act_plane)
         self.frames.append(obs)
         return self._get_ob(), reward, done, info
@@ -215,9 +338,17 @@ class AtariFrameStack(gym.Wrapper):
         self.k = stack_frames
         self.frames = deque([], maxlen=self.k)
         shp = env.observation_space.shape
-        self.observation_space = spaces.Box(low=0, high=255, shape=(shp[:-1] + (shp[-1] * self.k,)), dtype=env.observation_space.dtype)
+        self.observation_space = spaces.Box(low=0, high=255, shape=(self.k, shp[:-1]), dtype=env.observation_space.dtype)
 
-        self._max_episode_steps = env._max_episode_steps
+        self._max_episode_steps = self.env._max_episode_steps
+
+    @property
+    def _elapsed_steps(self):
+        return self.env._elapsed_steps
+
+    @_elapsed_steps.setter
+    def _elapsed_steps(self, steps):
+        self.env._elapsed_steps = steps
 
     def reset(self):
         obs = self.env.reset()
@@ -235,13 +366,35 @@ class AtariFrameStack(gym.Wrapper):
         return LazyFrames(list(self.frames))
 
 
-class FrameStack(gym.Wrapper):
+class StackStates(gym.Wrapper):
     def __init__(self, env, stack_frames):
         gym.Wrapper.__init__(self, env)
         self.k = stack_frames
         self.frames = deque([], maxlen=self.k)
 
-        self._max_episode_steps = env._max_episode_steps
+        old_shape = env.observation_space.shape
+        if len(old_shape) > 1:
+            env.observation_space.shape = (self.k, *old_shape[:-1])
+        else:
+            env.observation_space.shape = (self.k, *old_shape)
+
+        self._max_episode_steps = self.env._max_episode_steps
+
+    @property
+    def _elapsed_steps(self):
+        return self.env._elapsed_steps
+
+    @_elapsed_steps.setter
+    def _elapsed_steps(self, steps):
+        self.env._elapsed_steps = steps
+
+    @property
+    def was_real_done(self):
+        return self.env.was_real_done
+
+    @was_real_done.setter
+    def was_real_done(self, was_real_done):
+        self.env.was_real_done = was_real_done
 
     def reset(self):
         obs = self.env.reset()
@@ -310,7 +463,7 @@ def wrap_atari(env, config):
             env = AtariFrameStack(env, config.stack_frames)
 
     if config.clip_rewards:
-            env = ClipRewardEnv(env)
+        env = ClipRewardEnv(env)
 
     return env
 
@@ -320,10 +473,19 @@ def wrap_game(env, config):
     if config.wrap_atari:
         env = wrap_atari(env, config)
     else:
-        if config.stack_frames > 1:
-            env = FrameStack(env, config.stack_frames)
+        if config.noop_reset:
+            env = NoopResetEnv(env, config.noop_max)
         if config.sticky_actions > 1:
             env = StickyActions(env, config.sticky_actions)
+        if config.episode_life:
+            if 'Pong' in config.environment:
+                env = EpisodicLifeEnvPong(env)
+            else:
+                env = EpisodicLifeEnv(env)
+        if config.fire_reset:
+            env = FireResetEnv(env)
+        if config.stack_states > 1:
+            env = StackStates(env, config.stack_states)
         if config.clip_rewards:
             env = ClipRewardEnv(env)
     return env
