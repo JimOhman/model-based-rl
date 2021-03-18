@@ -121,7 +121,7 @@ def make_config():
   self_play = parser.add_argument_group('self play')
   self_play.add_argument('--num_actors', nargs='+', type=int, default=[7])
   self_play.add_argument('--max_steps', type=int, default=40000)
-  self_play.add_argument('--num_simulations', nargs='+', type=int, default=[None])
+  self_play.add_argument('--num_simulations', nargs='+', type=int, default=[30])
   self_play.add_argument('--max_history_length', type=int, default=500)
   self_play.add_argument('--visit_softmax_temperatures', nargs='+', type=float, default=[1.0, 0.5, 0.25])
   self_play.add_argument('--visit_softmax_steps', nargs='+', type=int, default=[15e3, 30e3])
