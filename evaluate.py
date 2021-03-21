@@ -312,9 +312,6 @@ class Evaluator(SummaryTools):
           game.pred_rewards.append(reward)
           game.apply(action)
 
-          if game.history.rewards[-1] != 0:
-            prev_reward_step = game.step
-
           if self.config.render:
             try:
               frame = game.environment.unwrapped._get_image()

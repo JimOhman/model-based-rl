@@ -15,7 +15,7 @@ import ray
 
 
 def launch(config, run_tag, date):
-  ray.init(num_gpus=1)
+  ray.init()
 
   if config.load_state:
     state = torch.load(config.load_state)

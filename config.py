@@ -41,9 +41,9 @@ class Config(object):
   def visit_softmax_temperature(self, training_step):
       step1, step2 = self.visit_softmax_steps
       temp1, temp2, temp3 = self.visit_softmax_temperatures
-      if training_step < step1:
+      if training_step <= step1:
         return temp1
-      elif training_step < step2:
+      elif training_step <= step2:
         return temp2
       else:
         return temp3

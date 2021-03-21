@@ -1,0 +1,9 @@
+opencv_python==4.5.1.48
+pytz==2019.3
+numpy==1.17.4
+torch==1.7.1
+gym==0.18.0
+pydot==1.4.1
+pyglet==1.5.0
+matplotlib==3.1.2
+ray==1.1.0
