@@ -120,8 +120,8 @@ class Learner(Logger):
             print("reward loss: {}".format(reward_loss))
             print("value loss: {}".format(value_loss))
             print("policy loss: {}".format(policy_loss))
-            print("throughput: learner={:.0f}, actors={:.0f}".format(throughput['ups'], 
-                                                                     throughput['fps']))
+            print("throughput: learner={:.0f}, actors={:.0f}".format(self.throughput['ups'], 
+                                                                     self.throughput['fps']))
 
           if self.log and self.training_step % self.config.learner_log_frequency == 0:
             self.log_scalar(tag='loss/reward', value=reward_loss, i=self.training_step)
