@@ -1,3 +1,4 @@
 runs/
 remove/
 __pycache__/
+*.swp

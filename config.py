@@ -100,7 +100,7 @@ def make_config():
   # Environment Modifications
   environment_modifications = parser.add_argument_group('general environment modifications')
   environment_modifications.add_argument('--clip_rewards', action='store_true')
-  environment_modifications.add_argument('--stack_states', type=int, default=1)
+  environment_modifications.add_argument('--stack_frames', type=int, default=1)
   environment_modifications.add_argument('--state_range', nargs='+', type=float, default=None)
   environment_modifications.add_argument('--norm_states', action='store_true')
   environment_modifications.add_argument('--max_episode_steps', type=int, default=None)

@@ -366,7 +366,7 @@ class AtariFrameStack(gym.Wrapper):
         return LazyFrames(list(self.frames))
 
 
-class StackStates(gym.Wrapper):
+class StackFrames(gym.Wrapper):
     def __init__(self, env, stack_frames):
         gym.Wrapper.__init__(self, env)
         self.k = stack_frames
@@ -484,8 +484,8 @@ def wrap_game(env, config):
                 env = EpisodicLifeEnv(env)
         if config.fire_reset:
             env = FireResetEnv(env)
-        if config.stack_states > 1:
-            env = StackStates(env, config.stack_states)
+        if config.stack_frames > 1:
+            env = StackFrames(env, config.stack_frames)
         if config.clip_rewards:
             env = ClipRewardEnv(env)
     return env
