@@ -77,7 +77,9 @@ python evaluate.py --saves_dir model-based-rl/runs/(environment)/(group_tag)/(ru
 | `--reward_support` |Min and max of the reward support (default: -15 15)|
 | `--no_support` |Turn off support|
 | `--seed` |Set the seed for random number generators (default: None)|
-|**Environment arguments**|**Description**|
+
+|Environment arguments| Description|
+|:-------------|:-------------|
 | `--clip_rewards` |Clip rewards to [-1, 1]|
 | `--stack_states` |Stack given amount of consecutive states to a new state (default: 1)|
 | `--state_range` |Specify the value range of features for the state, ex. 0 255 (default: None)|
@@ -89,7 +91,9 @@ python evaluate.py --saves_dir model-based-rl/runs/(environment)/(group_tag)/(ru
 | `--noop_reset` |Apply the NOOP action a random amount of times between [0, --noop_max] after a reset call in Atari games|
 | `--noop_max` |Change the maximum for --noop_reset (default: 30)|
 | `--avoid_repeat` |Adds a 5% chance of random action if no reward is observed for 500 steps|
-|**Self-Play arguments**|**Description**|
+
+|Self-Play arguments| Description|
+|:-------------|:-------------|
 | `--num_actors` |Number of self-play actors to launch, ex. num_cpu_cores - 1 (default: 7)|
 | `--max_steps` |Maximum amount of steps per game (default: 40000)|
 | `--num_simulations` |Amount of MCTS simulations at each step (default: 30)|
@@ -101,14 +105,18 @@ python evaluate.py --saves_dir model-based-rl/runs/(environment)/(group_tag)/(ru
 | `--root_exploration_fraction` |Fraction of dirichlet noise added to the root node (default: 0.25)|
 | `--pb_c_base` |Base value of cpuct in the UCB formula (default: 19652)|
 | `--pb_c_init` |Initial value of cpuct in the UCB formula (default: 1.25)|
-|**Prioritized Experience Replay arguments**|**Description**|
+
+|Prioritized Experience Replay arguments| Description|
+|:-------------|:-------------|
 | `--window_size` |Max amount of experiences to store (default: 100000)|
 | `--window_step` |Step size to increase window size (default: None)|
 | `--epsilon` |Lowest possible priority (default: 0.01)|
 | `--alpha` |Raise each priority by this power (default: 1.)|
 | `--beta` |Use to correct for the sampling bias (default: 1.)|
 | `--beta_increment_per_sampling` |Increase the --beta towards 1 each sampling (default: 0.001)|
-|**Training arguments**|**Description**|
+
+|Training arguments| Description|
+|:-------------|:-------------|
 | `--training_steps` |Amount of training steps to complete (default: 100000000)|
 | `--policy_loss` |Loss function for the policy (default: CrossEntropyLoss)|
 | `--scalar_loss` |Loss function for the value and reward function, if support is not used (default: MSE)|
@@ -131,11 +139,15 @@ python evaluate.py --saves_dir model-based-rl/runs/(environment)/(group_tag)/(ru
 | `--lr_init` |Initial learning rate (default: 0.0008)|
 | `--lr_decay_rate` |Decay rate for learning rate scheduler that use it (default: 0.01)|
 | `--lr_decay_steps` |Training steps until the lr has been reduced by a factor of --decay_rate (default: 100000)|
-|**Saving and Loading arguments**|**Description**|
+
+|Saving and Loading arguments|Description|
+|:-------------|:-------------|
 | `--save_state_frequency` |Save the learners state with this frequency in terms of training steps (default: 1000)|
 | `--load_state` |Load the state of a saved learner with the given path and continues training from there (default: None)|
 | `--override_loaded_config` |Override the config in the loaded state with the current config|
-|**Evalutation arguments**|**Description**|
+
+|Evalutation arguments|Description|
+|:-------------|:-------------|
 | `--saves_dir ` |Path to the saves directory which stores the learner states (required)|
 | `--evaluate_nets` |Names of learner states in the given saves directory to compare between (required)|
 | `--games_per_evaluation` |Number of games to evaluate state on. (default: 1)|
@@ -155,10 +167,14 @@ python evaluate.py --saves_dir model-based-rl/runs/(environment)/(group_tag)/(ru
 | `--only_prior {0, 1}` |Set as 1 to only use the networks prior to play (default: 0)|
 | `--only_value {0, 1}` |Set as 1 to only use networks value function to play (default: 0)|
 | `--use_exploration_noise {0, 1}` |Set to 1 to include dirichlet noise during evaluation (default: 0)|
-|**Logging arguments**|**Description**|
+
+|Logging arguments|Description|
+|:-------------|:-------------|
 | `--log {actors, learner}` |Specify actors or learner or both to log training results into tensorboard. (default: None)|
 | `--group_tag ` |An optional tag used to group training runs, used mainly for tensorboard (default: default)|
 | `--run_tag ` |A tag specifying the training run, used mainly for tensorboard (default: auto-generated)|
-|**Debugging arguments**|**Description**|
+
+|Debugging arguments|Description|
+|:-------------|:-------------|
 | `--debug ` |Include weight distributions per training step in tensorboard when --log learner is given|
 | `--verbose {actors, learner}` |Print info about loss and game results during training (default: None)|
