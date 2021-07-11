@@ -266,7 +266,7 @@ class MuZeroDynamics(nn.Module):
             out = block(out)
         state = out
         reward = F.relu(self.fc1(out.view(batch_size, -1)))
-        reward = self.fc2(out.view(batch_size, -1))
+        reward = self.fc2(reward.view(batch_size, -1))
         return state, reward
 
 
@@ -276,10 +276,10 @@ class MuZeroPrediction(nn.Module):
         super(MuZeroPrediction, self).__init__()
         self.resblocks = nn.ModuleList([ResidualBlock(128) for _ in range(16)])
 
-        self.fc_value = nn.Linear(6 * 6 * 128, value_support_size)
+        self.fc_value = nn.Linear(6 * 6 * 128, 512)
         self.fc_value_o = nn.Linear(512, value_support_size)
 
-        self.fc_policy = nn.Linear(6 * 6 * 128, action_space)
+        self.fc_policy = nn.Linear(6 * 6 * 128, 512)
         self.fc_policy_o = nn.Linear(512, action_space)
 
     def forward(self, x):
@@ -290,10 +290,10 @@ class MuZeroPrediction(nn.Module):
         out = out.view(batch_size, -1)
 
         value = F.relu(self.fc_value(out))
-        value = self.fc_value(out)
+        value = self.fc_value_o(out)
 
         policy = F.relu(self.fc_policy(out))
-        policy = self.fc_policy(out)
+        policy = self.fc_policy_o(out)
 
         return policy, value
 
