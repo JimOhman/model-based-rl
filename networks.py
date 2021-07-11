@@ -303,12 +303,15 @@ class MuZeroNetwork(BaseNetwork):
     def __init__(self, input_channels, action_space, device, config):
         super(MuZeroNetwork, self).__init__()
         self.device = device
+        
         self.no_support = config.no_support
         self.action_space = action_space
+        value_output_dim = config.value_support_size if not config.no_support else 1
+        reward_output_dim = config.reward_support_size if not config.no_support else 1
 
         self.representation_head = MuZeroRepresentation(input_channels)
-        self.prediction_head = MuZeroPrediction(action_space, config.value_support_size)
-        self.dynamics_head = MuZeroDynamics(config.reward_support_size)
+        self.prediction_head = MuZeroPrediction(action_space, value_output_dim)
+        self.dynamics_head = MuZeroDynamics(reward_output_dim)
         self.to(device)
 
         self.inverse_reward_transform = config.inverse_reward_transform
