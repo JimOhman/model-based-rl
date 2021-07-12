@@ -290,10 +290,10 @@ class MuZeroPrediction(nn.Module):
         out = out.view(batch_size, -1)
 
         value = F.relu(self.fc_value(out))
-        value = self.fc_value_o(out)
+        value = self.fc_value_o(value)
 
         policy = F.relu(self.fc_policy(out))
-        policy = self.fc_policy_o(out)
+        policy = self.fc_policy_o(policy)
 
         return policy, value
 
