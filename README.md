@@ -1,33 +1,11 @@
-# model-based-rl
-A PyTorch implementation of MuZero from [Mastering Atari, Go, Chess and Shogi by Planning with a Learned Model](https://arxiv.org/pdf/1911.08265.pdf), which is mainly used for fun and testing ideas.
+# MuZero
+A PyTorch implementation of MuZero from [Mastering Atari, Go, Chess and Shogi by Planning with a Learned Model](https://arxiv.org/pdf/1911.08265.pdf). It is used for fun and testing ideas.
 
-_This implementation currently only supports one-player games._
+* [x] Is distributed through [Ray](https://github.com/ray-project/ray)
+* [x] Handles any (one/two-player) game written in style of an [OpenAI Gym](https://github.com/openai/gym) game
+* [x] Training results can be viewed live with [Tensorboard](https://github.com/tensorflow/tensorboard)
 
-## Examples
-
-### LunarLander-v2
-
-Random            |  Trained
-:-------------------------:|:-------------------------:
-<img src="data/LunarLander/RandomAgent.gif" width="550" height="300"/>  |  <img src="data/LunarLander/LunarLanderAgent.gif" width="550" height="300"/>
-
-- Training results
-
-![](data/LunarLander/tensorboard.png)
-
----
-
-### Pong-ramNoFrameskip-v4
-
-Random            |  Trained
-:-------------------------:|:-------------------------:
-<img src="data/Pong/RandomAgent.gif" width="250" height="325"/>  |  <img src="data/Pong/PongAgent.gif" width="250" height="325"/>
-
-- Training results
-
-![](data/Pong/tensorboard.png)
-
----
+## Trained Examples
 
 ### Breakout-ramNoFrameskip-v4
 
@@ -35,9 +13,27 @@ Random            |  Trained
 :-------------------------:|:-------------------------:
 <img src="data/Breakout/RandomAgent.gif" width="250" height="325"/> | <img src="data/Breakout/BreakoutAgent.gif" width="250" height="325"/>
 
-- Training results
+[Tensorboard training results](https://github.com/JimOhman/model-based-rl/blob/master/data/Breakout/tensorboard.png)
 
-![](data/Breakout/tensorboard.png)
+### Pong-ramNoFrameskip-v4
+
+Random            |  Trained
+:-------------------------:|:-------------------------:
+<img src="data/Pong/RandomAgent.gif" width="250" height="325"/>  |  <img src="data/Pong/PongAgent.gif" width="250" height="325"/>
+
+[Tensorboard training results](https://github.com/JimOhman/model-based-rl/blob/master/data/Pong/tensorboard.png)
+
+### LunarLander-v2
+
+Random            |  Trained
+:-------------------------:|:-------------------------:
+<img src="data/LunarLander/RandomAgent.gif" width="550" height="300"/>  |  <img src="data/LunarLander/LunarLanderAgent.gif" width="550" height="300"/>
+
+[Tensorboard training results](https://github.com/JimOhman/model-based-rl/blob/master/data/LunarLander/tensorboard.png)
+
+### Tic-Tac-Toe
+
+[Tensorboard training results](https://github.com/JimOhman/model-based-rl/blob/master/data/TicTacToe/tensorboard.png)
 
 ---
 ## Installation:
@@ -57,6 +53,8 @@ pip install -r requirements.txt
 
 * Breakout-ramNoFrameskip-v4: ```python train.py --environment Breakout-ramNoFrameskip-v4 --architecture FCNetwork --log actors learner --num_actors 7 
 --fixed_temperatures 1.0 0.8 0.7 0.5 0.3 0.2 0.1 --td_steps 10 --window_size 200000 --batch_size 512 --state_range 0 255 --norm_states --sticky_actions 4 --noop_reset --episode_life --fire_reset --clip_rewards --avoid_repeat  --group_tag my_group_tag --run_tag my_run_tag```
+
+* Tic-Tac-Toe: ```python train.py --environment tictactoe --two_players --architecture FCNetwork --log actors learner --num_actors 7 --fixed_temperatures 1.0 0.8 0.7 0.5 0.3 0.2 0.1 --td_steps 10 --discount 1 --known_bounds -1 1 --stored_before_train 20000 --group_tag my_group_tag --run_tag my_run_tag```
 
 See live training results with tensorboard:
 ```bash
