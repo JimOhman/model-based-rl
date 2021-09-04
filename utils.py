@@ -10,8 +10,12 @@ import gym
 
 
 def get_environment(config):
-    environment = gym.make(config.environment)
-    environment = wrap_game(environment, config)
+    if config.environment == 'tictactoe':
+      from environments.tictactoe import TicTacToe
+      environment = TicTacToe()
+    else:
+      environment = gym.make(config.environment)
+      environment = wrap_game(environment, config)
     return environment
 
 def get_network(config, device=None):

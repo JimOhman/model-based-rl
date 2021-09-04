@@ -32,8 +32,9 @@ def write_mcts_as_png(search_paths, max_search_depth=float('inf'), path_to_file=
             chosen_nodes.append(node)
 
           parent_id = str(node)
-          chosen_action = np.argmax([child.visit_count for child in node.children])
-          for action, child in enumerate(node.children):
+          _, chosen_action = max([(child.visit_count, action)
+                                  for action, child in node.children.items()])
+          for action, child in node.children.items():
             child_id = str(child)
 
             node_args = args.copy()

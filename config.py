@@ -69,13 +69,15 @@ class Config(object):
 
   @staticmethod
   def select_action(node, temperature=0.):
-      visit_counts = np.array([child.visit_count for child in node.children])
+      actions = list(node.children.keys())
+      visit_counts = np.array([child.visit_count for child in node.children.values()])
       if temperature:
         distribution = visit_counts ** (1/temperature)
-        distribution = distribution / sum(distribution)
-        action = np.random.choice(len(visit_counts), p=distribution)
+        distribution = distribution / distribution.sum()
+        idx = np.random.choice(len(actions), p=distribution)
       else:
-        action = np.random.choice(np.where(visit_counts == visit_counts.max())[0])
+        idx = np.random.choice(np.where(visit_counts == visit_counts.max())[0])
+      action = actions[idx]
       return action
 
   def new_game(self, environment):
@@ -96,6 +98,7 @@ def make_config():
   ### Environment
   environment = parser.add_argument_group('environment')
   environment.add_argument('--environment', type=str, default='LunarLander-v2')
+  environment.add_argument('--two_players', action='store_true')
 
   # Environment Modifications
   environment_modifications = parser.add_argument_group('general environment modifications')
@@ -132,6 +135,7 @@ def make_config():
   exploration.add_argument('--root_dirichlet_alpha', type=float, default=0.25)
   exploration.add_argument('--root_exploration_fraction', type=float, default=0.25)
   exploration.add_argument('--init_value_score', type=float, default=0.0)
+  exploration.add_argument('--known_bounds', nargs='+', type=float, default=[None, None])
 
   # UCB formula
   ucb = parser.add_argument_group('UCB formula')
@@ -206,6 +210,8 @@ def make_config():
   evaluation.add_argument('--save_mcts', action='store_true')
   evaluation.add_argument('--save_mcts_after_step', type=int, default=0)
   evaluation.add_argument('--render', action='store_true')
+  evaluation.add_argument('--human_opp', type=int, choices=[0, 1], default=None)
+  evaluation.add_argument('--random_opp', type=int, choices=[0, 1], default=None)
 
   ### Logging
   logging = parser.add_argument_group('logging')
@@ -220,6 +226,10 @@ def make_config():
   debug.add_argument('--debug', action='store_true')
   debug.add_argument('--verbose', nargs='+', type=str, default='')
 
-  args = vars(parser.parse_args())
+  args = parser.parse_args()
 
-  return Config(args=args)
+  if any(np.array(args.window_size) < args.stored_before_train):
+    err_msg = '--window_size must be larger than --stored_before_train.'
+    parser.error(err_msg)
+
+  return Config(args=vars(args))

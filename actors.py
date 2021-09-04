@@ -1,4 +1,5 @@
 from utils import get_network, get_environment, set_all_seeds
+from collections import defaultdict
 from mcts import MCTS, Node
 from logger import Logger
 from copy import deepcopy
@@ -35,10 +36,10 @@ class Actor(Logger):
     self.network.eval()
 
     if config.fixed_temperatures:
-      self.temperature = config.fixed_temperatures[worker_id]
-      self.worker_id = 'actor-{}/temp={}'.format(worker_id, round(self.temperature, 1))
+      self.fixed_temperature = config.fixed_temperatures[worker_id]
+      self.worker_id = 'actor-{}/temp={}'.format(worker_id, round(self.fixed_temperature, 1))
     else:
-      self.temperature = None
+      self.fixed_temperature = None
 
     if self.config.norm_states:
       self.obs_min = np.array(self.config.state_range[::2], dtype=np.float32)
@@ -48,6 +49,8 @@ class Actor(Logger):
     self.training_step, self.games_played = 0, 0
     self.return_to_log, self.length_to_log = 0, 0
     self.value_to_log = 0
+    if self.config.two_players:
+      self.stats_to_log = defaultdict(int)
 
     if state is not None:
       self.load_state(state, date)
@@ -114,8 +117,9 @@ class Actor(Logger):
 
       if self.verbose:
         date = datetime.datetime.now(tz=pytz.timezone('Europe/Stockholm')).strftime("%d-%b-%Y_%H:%M:%S")
-        print("{}: [{}] Step {}, Game {} --> length: {}, return: {}".format(self.worker_id.capitalize(), date, self.training_step,
-                                                                            self.games_played, game.step, game.sum_rewards))
+        msg = "{}: [{}] Step {}, Game {} --> length: {}, return: {}"
+        print(msg.format(self.worker_id.capitalize(), date, self.training_step,
+                         self.games_played, game.step, game.sum_rewards))
 
       if self.log and self.games_played % self.config.actor_log_frequency == 0:
         return_to_log = self.return_to_log / self.config.actor_log_frequency
@@ -128,6 +132,11 @@ class Actor(Logger):
         self.length_to_log = 0
         self.value_to_log = 0
 
+      if self.log and self.config.two_players and self.games_played % 100 == 0:
+        value_dict = {key:value/100 for key, value in self.stats_to_log.items()}
+        self.log_scalars(group_tag='games/stats', value_dict=value_dict, i=self.games_played)
+        self.stats_to_log = defaultdict(int)
+
       if self.config.revisit:
         if (self.games_played - self.prev_revisit_step) == self.config.revisit_frequency:
           self.revisit_history()
@@ -135,10 +144,10 @@ class Actor(Logger):
     self.sync_weights(force=True)
 
   def play_game(self, game):
-    if self.temperature is None:
+    if self.fixed_temperature is None:
       temperature = self.config.visit_softmax_temperature(self.training_step)
     else:
-      temperature = self.temperature
+      temperature = self.fixed_temperature
 
     while not game.terminal:
       root = Node(0)
@@ -150,7 +159,8 @@ class Actor(Logger):
 
       initial_inference = self.network.initial_inference(current_observation.unsqueeze(0))
 
-      root.expand(network_output=initial_inference)
+      legal_actions = game.environment.legal_actions()
+      root.expand(initial_inference, game.to_play, legal_actions)
       root.add_exploration_noise(self.config.root_dirichlet_alpha, self.config.root_exploration_fraction)
 
       self.mcts.run(root, self.network)
@@ -182,6 +192,9 @@ class Actor(Logger):
       if game.step >= self.config.max_steps:
         self.environment.was_real_done = True
         break
+
+    if self.config.two_players:
+      self.stats_to_log[game.info["result"]] += 1
 
   def launch(self):
     print("{} is online.".format(self.worker_id.capitalize()))

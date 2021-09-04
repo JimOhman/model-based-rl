@@ -252,33 +252,37 @@ class Evaluator(SummaryTools):
 
         initial_inference = self.network.initial_inference(current_observation.unsqueeze(0))
         
-        root.expand(network_output=initial_inference)
+        legal_actions = game.environment.legal_actions()
+        root.expand(initial_inference, game.to_play, legal_actions)
 
         if self.config.use_exploration_noise:
           root.add_exploration_noise(self.config.root_dirichlet_alpha, self.config.root_exploration_fraction)
 
         actions_to_apply, corresponding_rewards = [], []
         if self.config.only_prior:
-          action = np.argmax([child.prior for child in root.children])
-          reward = self.network.recurrent_inference(root.hidden_state, [action]).reward
+          _, action = max([(child.prior, action) for action, child in root.children.items()])
+          reward = self.network.recurrent_inference(root.hidden_state, [action]).reward.item()
           actions_to_apply.append(action)
           corresponding_rewards.append(reward)
           root.children[action].visit_count += 1
           game.search_depths.append([0])
 
         elif self.config.only_value:
-          pred_rewards = []
           q_values = []
-
-          for action in range(len(root.children)):
+          max_q_val = -np.float('inf')
+          for action in root.children.keys():
             output = self.network.recurrent_inference(root.hidden_state, [action])
-            pred_rewards.append(output.reward)
-            q_values.append(output.reward + self.config.discount * output.value)
+            if self.config.two_players:
+              q_val = (output.reward - self.config.discount * output.value).item()
+            else:
+              q_val = (output.reward + self.config.discount * output.value).item()
+            if q_val > max_q_val:
+              max_q_val = q_val
+              chosen_action = action
+              reward = output.reward.item()
             root.children[action].visit_count += 1
 
-          action = np.argmax(q_values)
-          reward = pred_rewards[action]
-          actions_to_apply.append(action)
+          actions_to_apply.append(chosen_action)
           corresponding_rewards.append(reward)
           game.search_depths.append([1])
 
@@ -307,9 +311,20 @@ class Evaluator(SummaryTools):
 
         game.pred_values.append(initial_inference.value.item())
         game.store_search_statistics(root)
-
+        
         for action, reward in zip(actions_to_apply, corresponding_rewards):
           game.pred_rewards.append(reward)
+          if self.config.two_players:
+            if game.to_play == self.config.random_opp:
+              action = np.random.choice(legal_actions)
+            elif game.to_play == self.config.human_opp:
+              print("waiting for your input: {}".format(legal_actions))
+              action = int(input())
+              while action not in legal_actions:
+                print("invalid action, choose again!")
+                action = int(input())
+            to_play = game.to_play
+
           game.apply(action)
 
           if self.config.render:
@@ -326,6 +341,9 @@ class Evaluator(SummaryTools):
           if game.terminal or game.step >= self.config.max_steps:
             environment.was_real_done = True
             game.terminal = True
+            if self.config.two_players:
+              if to_play in [self.config.random_opp, self.config.human_opp]:
+                game.history.rewards[-1] *= -1
             break
 
       msg = "\033[92m[Game done]\033[0m --> "
@@ -388,6 +406,8 @@ def state_generator(config):
                   state['config'].save_gif_as = config.save_gif_as
                   state['config'].sleep = config.sleep
                   state['config'].label = get_label(state, config, idx)
+                  state['config'].random_opp = config.random_opp
+                  state['config'].human_opp = config.human_opp
 
                   make_backwards_compatible(state['config'])
 

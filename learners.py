@@ -229,3 +229,4 @@ class Learner(Logger):
   def launch(self):
     print("Learner is online.")
     self.learn()
+

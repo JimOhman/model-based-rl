@@ -12,6 +12,7 @@ class HistorySlice(NamedTuple):
   dones: list
   steps: list
   env_states: list
+  to_play: list
 
 
 class History():
@@ -24,7 +25,8 @@ class History():
                      errors: list,
                      dones: list,
                      steps: list,
-                     env_states: list):
+                     env_states: list,
+                     to_play: list):
     self.observations = observations
     self.child_visits = child_visits
     self.root_values = root_values
@@ -34,6 +36,7 @@ class History():
     self.dones = dones
     self.steps = steps
     self.env_states = env_states
+    self.to_play = to_play
 
   def get_slice(self, collect_from):
     return HistorySlice(self.observations[collect_from:],
@@ -44,7 +47,8 @@ class History():
                         self.errors[collect_from:],
                         self.dones[collect_from:],
                         self.steps[collect_from:],
-                        self.env_states[collect_from:])
+                        self.env_states[collect_from:],
+                        self.to_play[collect_from:])
 
 
 class Game(object):
@@ -55,10 +59,13 @@ class Game(object):
     self.sticky_actions = config.sticky_actions
     self.use_q_max = config.use_q_max
     self.revisit = config.revisit
+    self.two_players = config.two_players
+    self.action_space = range(config.action_space)
+    self.discount = config.discount
 
     self.environment = environment
 
-    self.history = History([], [], [], [], [], [], [], [], [])
+    self.history = History([], [], [], [], [], [], [], [], [], [])
 
     self.terminal, self.done = False, False
     self.previous_collect_to = 0
@@ -66,9 +73,11 @@ class Game(object):
     self.sum_rewards = 0
     self.sum_values = 0
     self.step = 0
+    self.to_play = 0
 
     self.avoid_repeat = config.avoid_repeat
     self.non_zero_reward_step = 0
+    self.info = {}
 
   def apply(self, action):
 
@@ -88,10 +97,7 @@ class Game(object):
     if reward != 0:
       self.non_zero_reward_step = self.environment._elapsed_steps
 
-    if self.clip_rewards:
-      self.sum_rewards += self.environment.last_reward
-    else:
-      self.sum_rewards += reward
+    self.sum_rewards += self.environment.last_reward if self.clip_rewards else reward
 
     self.step = self.environment._elapsed_steps
     self.history_idx += 1
@@ -106,14 +112,28 @@ class Game(object):
     self.history.actions.append(action)
     self.history.dones.append(done)
     self.history.rewards.append(reward)
+    self.history.to_play.append(self.to_play)
+    self.info = info
+    
+    if self.two_players:
+      self.to_play = (self.to_play + 1) % 2
 
   def store_search_statistics(self, root):
-    sum_visits = sum(child.visit_count for child in root.children)
-    self.history.child_visits.append([child.visit_count/sum_visits for child in root.children])
+    sum_visits = sum(child.visit_count for child in root.children.values())
+    self.history.child_visits.append([
+      root.children[a].visit_count/sum_visits if a in root.children else 0
+      for a in self.action_space])
     if not self.use_q_max:
       value = root.value()
     else:
-      value = max([child.reward + child.value() for child in root.children])
+      q_values = []
+      for child in root.children.values():
+        if self.two_players:
+          q_value = child.reward - self.discount*child.value()
+        else:
+          q_value = child.reward + self.discount*child.value()
+        q_values.append(q_value)
+      value = max(q_values)
     self.history.root_values.append(value)
     self.sum_values += value
 
@@ -127,3 +147,4 @@ class Game(object):
     history = self.history.get_slice(collect_from)
     self.previous_collect_to = self.history_idx
     return history
+

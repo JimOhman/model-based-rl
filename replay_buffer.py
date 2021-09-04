@@ -72,6 +72,7 @@ class PrioritizedReplay():
         self.window_size = config.window_size
         self.window_step = config.window_step
         self.batch_size = config.batch_size
+        self.two_players = config.two_players
 
         self.beta_increment_per_sampling = config.beta_increment_per_sampling
         self.epsilon = config.epsilon
@@ -177,8 +178,16 @@ class PrioritizedReplay():
     def insert_target(self, batch_idx, history, step, target_rewards,
                                                       target_values,
                                                       target_policies):
-        end_index = len(history.root_values)
-        for idx, current_index in enumerate(range(step, step + self.num_unroll_steps + 1)):
+      end_index = len(history.root_values)
+      for idx, current_index in enumerate(range(step, step + self.num_unroll_steps + 1)):
+
+        if current_index > 0 and current_index <= len(history.rewards):
+          last_reward = history.rewards[current_index - 1]
+        else:
+          last_reward = 0
+
+        if current_index < end_index:
+          to_play = history.to_play[current_index]
 
           bootstrap_index = current_index + self.td_steps
           if bootstrap_index < end_index:
@@ -186,24 +195,19 @@ class PrioritizedReplay():
           else:
             value = 0
 
-          rewards = history.rewards[current_index:bootstrap_index]
-          if rewards:
-            rewards = np.array(rewards, dtype=np.float32)
-            value += np.dot(rewards, self.discounts[:len(rewards)])
+          for jdx, reward in enumerate(history.rewards[current_index:bootstrap_index]):
+            if history.to_play[current_index+jdx] == to_play:
+              value += self.discounts[jdx] * reward
+            else:
+              value -= self.discounts[jdx] * reward
 
-          if current_index > 0 and current_index <= len(history.rewards):
-            last_reward = history.rewards[current_index - 1]
-          else:
-            last_reward = 0
-
-          if current_index < end_index:
-            target_policies[batch_idx, idx, :] = history.child_visits[current_index]
-            target_rewards[batch_idx, idx] = last_reward
-            target_values[batch_idx, idx] = value
-          else:
-            target_policies[batch_idx, idx, :] = self.absorbing_policy
-            target_rewards[batch_idx, idx] = last_reward
-            target_values[batch_idx, idx] = 0
+          target_policies[batch_idx, idx, :] = history.child_visits[current_index]
+          target_rewards[batch_idx, idx] = last_reward
+          target_values[batch_idx, idx] = value
+        else:
+          target_policies[batch_idx, idx, :] = self.absorbing_policy
+          target_rewards[batch_idx, idx] = last_reward
+          target_values[batch_idx, idx] = 0
 
     def update(self, idxs, errors):
       priorities = self.get_priorities(errors)
