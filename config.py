@@ -89,9 +89,9 @@ def make_config():
 
   ### Network
   network = parser.add_argument_group('network')
-  network.add_argument('--architecture', type=str, default='FCNetwork')
-  network.add_argument('--value_support', nargs='+', type=int, default=[-15, 15])
-  network.add_argument('--reward_support', nargs='+', type=int, default=[-15, 15])
+  network.add_argument('--architecture', choices=['FCNetwork', 'MuZeroNetwork', 'TinyNetwork'], type=str, default='FCNetwork')
+  network.add_argument('--value_support', nargs=2, type=int, default=[-15, 15])
+  network.add_argument('--reward_support', nargs=2, type=int, default=[-15, 15])
   network.add_argument('--no_support', action='store_true')
   network.add_argument('--seed', nargs='+', type=int, default=[None])
 
@@ -126,8 +126,8 @@ def make_config():
   self_play.add_argument('--max_steps', type=int, default=40000)
   self_play.add_argument('--num_simulations', nargs='+', type=int, default=[30])
   self_play.add_argument('--max_history_length', type=int, default=500)
-  self_play.add_argument('--visit_softmax_temperatures', nargs='+', type=float, default=[1.0, 0.5, 0.25])
-  self_play.add_argument('--visit_softmax_steps', nargs='+', type=int, default=[15e3, 30e3])
+  self_play.add_argument('--visit_softmax_temperatures', nargs=2, type=float, default=[1.0, 0.5, 0.25])
+  self_play.add_argument('--visit_softmax_steps', nargs=2, type=int, default=[15e3, 30e3])
   self_play.add_argument('--fixed_temperatures', nargs='+', type=float, default=[])
 
   # MCTS exploration terms
@@ -135,7 +135,7 @@ def make_config():
   exploration.add_argument('--root_dirichlet_alpha', type=float, default=0.25)
   exploration.add_argument('--root_exploration_fraction', type=float, default=0.25)
   exploration.add_argument('--init_value_score', type=float, default=0.0)
-  exploration.add_argument('--known_bounds', nargs='+', type=float, default=[None, None])
+  exploration.add_argument('--known_bounds', nargs=2, type=float, default=[None, None])
 
   # UCB formula
   ucb = parser.add_argument_group('UCB formula')
@@ -167,13 +167,12 @@ def make_config():
   training.add_argument('--no_target_transform', action='store_true')
   training.add_argument('--sampling_ratio', type=float, default=0.)
   training.add_argument('--discount', nargs='+', type=float, default=[0.997])
-  training.add_argument('--inject_experiences_from', nargs='+', type=str, default=None)
   training.add_argument('--revisit_frequency', type=float, default=np.float('inf'))
   training.add_argument('--revisit', action='store_true')
   training.add_argument('--use_q_max', action='store_true')
 
   # Optimizer
-  training.add_argument('--optimizer', type=str, default='AdamW')
+  training.add_argument('--optimizer', choices=['RMSprop', 'Adam', 'AdamW', 'SGD'], type=str, default='AdamW')
   training.add_argument('--momentum', type=float, default=0.9)
   training.add_argument('--weight_decay', type=float, default=1e-4)
 
@@ -217,19 +216,25 @@ def make_config():
   logging = parser.add_argument_group('logging')
   logging.add_argument('--run_tag', type=str, default=None)
   logging.add_argument('--group_tag', type=str, default='default')
-  logging.add_argument('--log', nargs='+', type=str, default='')
+  logging.add_argument('--log', nargs=2, choices=['actors', 'learner'], type=str, default='')
   logging.add_argument('--actor_log_frequency', type=int, default=1)
   logging.add_argument('--learner_log_frequency', type=int, default=100)
 
   ### Debugging
   debug = parser.add_argument_group('debugging')
   debug.add_argument('--debug', action='store_true')
-  debug.add_argument('--verbose', nargs='+', type=str, default='')
+  debug.add_argument('--verbose', nargs=2, choices=['actors', 'learner'], type=str, default='')
 
   args = parser.parse_args()
 
   if any(np.array(args.window_size) < args.stored_before_train):
     err_msg = '--window_size must be larger than --stored_before_train.'
     parser.error(err_msg)
+
+  if args.fixed_temperatures:
+    for num_actors in args.num_actors:
+      if len(args.fixed_temperatures) != num_actors:
+        err_msg = 'if fixed temperatures is used a temperature for each actor must be specified.'
+        parser.error(err_msg)
 
   return Config(args=vars(args))

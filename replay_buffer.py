@@ -194,12 +194,13 @@ class PrioritizedReplay():
             value = history.root_values[bootstrap_index] * self.discount**self.td_steps
           else:
             value = 0
-
-          for jdx, reward in enumerate(history.rewards[current_index:bootstrap_index]):
-            if history.to_play[current_index+jdx] == to_play:
-              value += self.discounts[jdx] * reward
-            else:
-              value -= self.discounts[jdx] * reward
+          
+          rewards = history.rewards[current_index:bootstrap_index]
+          if rewards:
+            not_to_play = np.array(history.to_play[current_index:bootstrap_index]) != to_play
+            rewards = np.array(rewards, dtype=np.float32)
+            rewards[not_to_play] *= -1
+            value += np.dot(rewards, self.discounts[:len(rewards)])
 
           target_policies[batch_idx, idx, :] = history.child_visits[current_index]
           target_rewards[batch_idx, idx] = last_reward
