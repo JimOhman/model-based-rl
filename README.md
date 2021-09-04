@@ -89,6 +89,7 @@ python evaluate.py --saves_dir model-based-rl/runs/(environment)/(group_tag)/(ru
 | `--noop_reset` |Apply the NOOP action a random amount of times between [0, --noop_max] after a reset call in Atari games|
 | `--noop_max` |Change the maximum for --noop_reset (default: 30)|
 | `--avoid_repeat` |Adds a 5% chance of random action if no reward is observed for 500 steps|
+| `--two_players` |Specifies that the environment is for two-players|
 
 |Self-Play arguments| Description|
 |:-------------|:-------------|
@@ -103,6 +104,7 @@ python evaluate.py --saves_dir model-based-rl/runs/(environment)/(group_tag)/(ru
 | `--root_exploration_fraction` |Fraction of dirichlet noise added to the root node (default: 0.25)|
 | `--pb_c_base` |Base value of cpuct in the UCB formula (default: 19652)|
 | `--pb_c_init` |Initial value of cpuct in the UCB formula (default: 1.25)|
+| `--known_bounds` |Min and Max bounds for the value function. (default: [None, None])|
 
 |Prioritized Experience Replay arguments| Description|
 |:-------------|:-------------|
@@ -165,6 +167,8 @@ python evaluate.py --saves_dir model-based-rl/runs/(environment)/(group_tag)/(ru
 | `--only_prior {0, 1}` |Set as 1 to only use the networks prior to play (default: 0)|
 | `--only_value {0, 1}` |Set as 1 to only use networks value function to play (default: 0)|
 | `--use_exploration_noise {0, 1}` |Set to 1 to include dirichlet noise during evaluation (default: 0)|
+| `--human_opp {0, 1}` |For a two-player game, take control of either player (default: None)|
+| `--random_opp {0, 1}` |For a two-player game, make one opponent random (default: None)|
 
 |Logging arguments|Description|
 |:-------------|:-------------|
