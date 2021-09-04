@@ -1,33 +1,11 @@
-# model-based-rl
-A PyTorch implementation of MuZero from [Mastering Atari, Go, Chess and Shogi by Planning with a Learned Model](https://arxiv.org/pdf/1911.08265.pdf), which is mainly used for fun and testing ideas.
+# MuZero
+A PyTorch implementation of MuZero from [Mastering Atari, Go, Chess and Shogi by Planning with a Learned Model](https://arxiv.org/pdf/1911.08265.pdf). It is used for fun and testing ideas.
 
-_This implementation currently only supports one-player games._
+* [x] Is distributed through [Ray](https://github.com/ray-project/ray)
+* [x] Handles any (one/two-player) game written in style of an [OpenAI Gym](https://github.com/openai/gym) game
+* [x] Training results can be viewed live with [Tensorboard](https://github.com/tensorflow/tensorboard)
 
-## Examples
-
-### LunarLander-v2
-
-Random            |  Trained
-:-------------------------:|:-------------------------:
-<img src="data/LunarLander/RandomAgent.gif" width="550" height="300"/>  |  <img src="data/LunarLander/LunarLanderAgent.gif" width="550" height="300"/>
-
-- Training results
-
-![](data/LunarLander/tensorboard.png)
-
----
-
-### Pong-ramNoFrameskip-v4
-
-Random            |  Trained
-:-------------------------:|:-------------------------:
-<img src="data/Pong/RandomAgent.gif" width="250" height="325"/>  |  <img src="data/Pong/PongAgent.gif" width="250" height="325"/>
-
-- Training results
-
-![](data/Pong/tensorboard.png)
-
----
+## Trained Examples
 
 ### Breakout-ramNoFrameskip-v4
 
@@ -35,9 +13,27 @@ Random            |  Trained
 :-------------------------:|:-------------------------:
 <img src="data/Breakout/RandomAgent.gif" width="250" height="325"/> | <img src="data/Breakout/BreakoutAgent.gif" width="250" height="325"/>
 
-- Training results
+[Tensorboard training results](https://github.com/JimOhman/model-based-rl/blob/master/data/Breakout/tensorboard.png)
 
-![](data/Breakout/tensorboard.png)
+### Pong-ramNoFrameskip-v4
+
+Random            |  Trained
+:-------------------------:|:-------------------------:
+<img src="data/Pong/RandomAgent.gif" width="250" height="325"/>  |  <img src="data/Pong/PongAgent.gif" width="250" height="325"/>
+
+[Tensorboard training results](https://github.com/JimOhman/model-based-rl/blob/master/data/Pong/tensorboard.png)
+
+### LunarLander-v2
+
+Random            |  Trained
+:-------------------------:|:-------------------------:
+<img src="data/LunarLander/RandomAgent.gif" width="550" height="300"/>  |  <img src="data/LunarLander/LunarLanderAgent.gif" width="550" height="300"/>
+
+[Tensorboard training results](https://github.com/JimOhman/model-based-rl/blob/master/data/LunarLander/tensorboard.png)
+
+### Tic-Tac-Toe
+
+[Tensorboard training results](https://github.com/JimOhman/model-based-rl/blob/master/data/TicTacToe/tensorboard.png)
 
 ---
 ## Installation:
@@ -57,6 +53,8 @@ pip install -r requirements.txt
 
 * Breakout-ramNoFrameskip-v4: ```python train.py --environment Breakout-ramNoFrameskip-v4 --architecture FCNetwork --log actors learner --num_actors 7 
 --fixed_temperatures 1.0 0.8 0.7 0.5 0.3 0.2 0.1 --td_steps 10 --window_size 200000 --batch_size 512 --state_range 0 255 --norm_states --sticky_actions 4 --noop_reset --episode_life --fire_reset --clip_rewards --avoid_repeat  --group_tag my_group_tag --run_tag my_run_tag```
+
+* Tic-Tac-Toe: ```python train.py --environment tictactoe --two_players --architecture FCNetwork --log actors learner --num_actors 7 --fixed_temperatures 1.0 0.8 0.7 0.5 0.3 0.2 0.1 --td_steps 10 --discount 1 --known_bounds -1 1 --stored_before_train 20000 --group_tag my_group_tag --run_tag my_run_tag```
 
 See live training results with tensorboard:
 ```bash
@@ -91,6 +89,7 @@ python evaluate.py --saves_dir model-based-rl/runs/(environment)/(group_tag)/(ru
 | `--noop_reset` |Apply the NOOP action a random amount of times between [0, --noop_max] after a reset call in Atari games|
 | `--noop_max` |Change the maximum for --noop_reset (default: 30)|
 | `--avoid_repeat` |Adds a 5% chance of random action if no reward is observed for 500 steps|
+| `--two_players` |Specifies that the environment is for two-players|
 
 |Self-Play arguments| Description|
 |:-------------|:-------------|
@@ -105,6 +104,7 @@ python evaluate.py --saves_dir model-based-rl/runs/(environment)/(group_tag)/(ru
 | `--root_exploration_fraction` |Fraction of dirichlet noise added to the root node (default: 0.25)|
 | `--pb_c_base` |Base value of cpuct in the UCB formula (default: 19652)|
 | `--pb_c_init` |Initial value of cpuct in the UCB formula (default: 1.25)|
+| `--known_bounds` |Min and Max bounds for the value function. (default: [None, None])|
 
 |Prioritized Experience Replay arguments| Description|
 |:-------------|:-------------|
@@ -167,6 +167,8 @@ python evaluate.py --saves_dir model-based-rl/runs/(environment)/(group_tag)/(ru
 | `--only_prior {0, 1}` |Set as 1 to only use the networks prior to play (default: 0)|
 | `--only_value {0, 1}` |Set as 1 to only use networks value function to play (default: 0)|
 | `--use_exploration_noise {0, 1}` |Set to 1 to include dirichlet noise during evaluation (default: 0)|
+| `--human_opp {0, 1}` |For a two-player game, take control of either player (default: None)|
+| `--random_opp {0, 1}` |For a two-player game, make one opponent random (default: None)|
 
 |Logging arguments|Description|
 |:-------------|:-------------|
