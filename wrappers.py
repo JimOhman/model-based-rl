@@ -456,11 +456,11 @@ def wrap_atari(env, config):
 
     env = WarpFrame(env, config.frame_size)
 
-    if config.stack_frames:
+    if config.stack_obs:
         if config.stack_actions:
-            env = FrameActionStack(env, config.stack_frames)
+            env = FrameActionStack(env, config.stack_obs)
         else:
-            env = AtariFrameStack(env, config.stack_frames)
+            env = AtariFrameStack(env, config.stack_obs)
 
     if config.clip_rewards:
         env = ClipRewardEnv(env)
@@ -484,8 +484,8 @@ def wrap_game(env, config):
                 env = EpisodicLifeEnv(env)
         if config.fire_reset:
             env = FireResetEnv(env)
-        if config.stack_frames > 1:
-            env = StackFrames(env, config.stack_frames)
+        if config.stack_obs > 1:
+            env = StackFrames(env, config.stack_obs)
         if config.clip_rewards:
             env = ClipRewardEnv(env)
 

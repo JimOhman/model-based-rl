@@ -1,22 +1,25 @@
 import ray
 
+
 @ray.remote
 class SharedStorage(object):
 
-    def __init__(self, num_actors):
-        self.weights = None
-        self.stats = {'training step': 0}
+  def __init__(self, config):
+    actor_games = {key: 0 for key in range(config.num_actors)}
+    self.stats = {'training_step': 0, 'actor_games': actor_games}
+    self.weights = None
 
-    def latest_weights(self):
-        return self.weights, self.stats['training step']
+  def get_weights(self, games, actor_key):
+    self.stats['actor_games'][actor_key] = games
+    return self.weights, self.stats['training_step']
 
-    def store_weights(self, weights, step):
-        self.weights = weights
-        self.stats['training step'] = step
+  def store_weights(self, weights, step):
+    self.stats['training_step'] = step
+    self.weights = weights
 
-    def get_stats(self, tag=None):
-      return self.stats if tag is None else self.stats[tag]
+  def get_stats(self, key=None):
+    return self.stats if key is None else self.stats[key]
 
-    def set_stats(self, stats):
-      for key, value in stats.items():
-        self.stats[key] = value
+  def is_ready(self):
+    return self.weights is not None
+

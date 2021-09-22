@@ -8,23 +8,42 @@ import torch
 import time
 import pytz
 import ray
+import os
 
 
-@ray.remote(num_cpus=1)
+@ray.remote
 class Learner(Logger):
 
-  def __init__(self, config, storage, replay_buffer, state=None, run_tag=None, date=None):
+  def __init__(self, config, storage, replay_buffer, state=None):
     set_all_seeds(config.seed)
 
-    self.run_tag = run_tag
+    self.run_tag = config.run_tag
     self.group_tag = config.group_tag
     self.worker_id = 'learner'
     self.replay_buffer = replay_buffer
     self.storage = storage
     self.config = deepcopy(config)
 
-    self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available() and ray.get_gpu_ids():
+      self.device = torch.device("cuda")
+    else:
+      self.device = torch.device("cpu")
+
+    if "learner" in self.config.use_gpu_for:
+      if torch.cuda.is_available():
+        if self.config.learner_gpu_device_id is not None:
+          device_id = self.config.learner_gpu_device_id
+          self.device = torch.device("cuda:{}".format(device_id))
+        else:
+          self.device = torch.device("cuda")
+      else:
+        raise RuntimeError("GPU was requested but torch.cuda.is_available() is False.")
+    else:
+      self.device = torch.device("cpu")
+    
     self.network = get_network(config, self.device)
+    self.network.to(self.device)
+    self.network.train()
 
     self.optimizer = get_optimizer(config, self.network.parameters())
     self.lr_scheduler = get_lr_scheduler(config, self.optimizer)
@@ -33,69 +52,85 @@ class Learner(Logger):
     self.training_step = 0
     self.losses_to_log = {'reward': 0., 'value': 0., 'policy': 0.}
 
-    self.verbose = True if 'learner' in self.config.verbose else False
-    self.log = True if 'learner' in self.config.log else False
+    self.throughput = {'total_frames': 0, 'total_games': 0, 'training_step': 0, 'time': {'ups': 0, 'fps': 0}}
 
-    self.sleep = 0.
-    self.throughput = {'total_frames': 0, 'total_games': 0, 'fps': 0,
-                       'ups': 0, 'replay_ratio': 0, 'sample_ratio': 0,
-                       'training_step': 0, 'time': 0}
-
-    if self.config.norm_states:
-      self.obs_min = np.array(self.config.state_range[::2], dtype=np.float32)
-      self.obs_max = np.array(self.config.state_range[1::2], dtype=np.float32)
+    if self.config.norm_obs:
+      self.obs_min = np.array(self.config.obs_range[::2], dtype=np.float32)
+      self.obs_max = np.array(self.config.obs_range[1::2], dtype=np.float32)
       self.obs_range = self.obs_max - self.obs_min
 
     if state is not None:
-      self.load_state(state, date)
+      self.load_state(state)
 
     Logger.__init__(self)
 
-  def load_state(self, state, date):
+  def load_state(self, state):
+    self.run_tag = os.path.join(self.run_tag, 'resumed', '{}'.format(state['training_step']))
     self.network.load_state_dict(state['weights'])
     self.optimizer.load_state_dict(state['optimizer'])
-    self.training_step = state['step']
-    old_run_tag = state['dirs']['base'].split('{}'.format(self.config.group_tag))[1][1:]
-    self.run_tag = old_run_tag + '_resumed_' + date
+
+    self.replay_buffer.add_initial_throughput.remote(state['total_frames'], state['total_games'])
+    self.throughput['total_frames'] = state['total_frames']
+    self.throughput['training_step'] = state['training_step']
+    self.training_step = state['training_step'] 
+
+  def save_state(self):
+    actor_games = ray.get(self.storage.get_stats.remote('actor_games'))
+    state = {'dirs': self.dirs,
+             'config': self.config,
+    		 		 'weights': self.network.get_weights(),
+    		     'optimizer': self.optimizer.state_dict(),
+             'training_step': self.training_step,
+             'total_games': self.throughput['total_games'],
+             'total_frames': self.throughput['total_frames'],
+             'actor_games': actor_games}
+    path = os.path.join(self.dirs['saves'], str(state['training_step']))
+    torch.save(state, path)
 
   def send_weights(self):
     self.storage.store_weights.remote(self.network.get_weights(), self.training_step)
 
-  def update_throughput(self):
+  def log_throughput(self):
     data = ray.get(self.replay_buffer.get_throughput.remote())
-    current_time = time.time()
-    time_interval = current_time - self.throughput['time']
+
+    self.throughput['total_games'] = data['games']
+    self.log_scalar(tag='games/finished', value=data['games'], i=self.training_step)
 
     new_frames = data['frames'] - self.throughput['total_frames']
-    new_updates = self.training_step - self.throughput['training_step']
-    fps = new_frames / time_interval
-    ups = new_updates / time_interval
+    if new_frames > self.config.frames_before_fps_log:
 
-    self.throughput['total_frames'] = data['frames']
-    self.throughput['total_games'] = data['games']
-    self.throughput['ups'] = ups
-    self.throughput['fps'] = fps
-    if fps:
-      self.throughput['replay_ratio'] = self.throughput['ups'] / self.throughput['fps']
-      self.throughput['sample_ratio'] = self.config.batch_size * self.throughput['replay_ratio']
-    self.throughput['training_step'] = self.training_step
-    self.throughput['time'] = current_time
+      current_time = time.time()
+      new_updates = self.training_step - self.throughput['training_step']
+      ups = new_updates / (current_time - self.throughput['time']['ups'])
+      fps = new_frames / (current_time - self.throughput['time']['fps'])
+      replay_ratio = ups / fps
+      sample_ratio = self.config.batch_size * replay_ratio
+
+      self.throughput['total_frames'] = data['frames']
+      self.throughput['training_step'] = self.training_step
+      self.throughput['time']['ups'] = current_time
+      self.throughput['time']['fps'] = current_time
+
+      self.log_scalar(tag='throughput/frames_per_second', value=fps, i=self.training_step)
+      self.log_scalar(tag='throughput/updates_per_second', value=ups, i=self.training_step)
+      self.log_scalar(tag='throughput/replay_ratio', value=replay_ratio, i=self.training_step)
+      self.log_scalar(tag='throughput/sample_ratio', value=sample_ratio, i=self.training_step)
+      self.log_scalar(tag='throughput/total_frames', value=data['frames'], i=self.training_step)
 
   def learn(self):
     self.send_weights()
 
+    self.throughput['time']['fps'] = time.time() 
     while ray.get(self.replay_buffer.size.remote()) < self.config.stored_before_train:
       time.sleep(1)
 
-    self.network.train()
-    self.time_at_start = time.time()
+    self.throughput['time']['ups'] = time.time() 
     while self.training_step < self.config.training_steps:
-      not_ready = [self.replay_buffer.sample_batch.remote() for _ in range(self.config.batches_per_fetch)]
-      while len(not_ready) > 0:
-        ready, not_ready = ray.wait(not_ready, num_returns=1)
+      not_ready_batches = [self.replay_buffer.sample_batch.remote() for _ in range(self.config.batches_per_fetch)]
+      while len(not_ready_batches) > 0:
+        ready_batches, not_ready_batches = ray.wait(not_ready_batches, num_returns=1)
 
-        batch = ray.get(ready[0])
-
+        batch = ray.get(ready_batches[0])
         self.update_weights(batch)
         self.training_step += 1
 
@@ -105,57 +140,31 @@ class Learner(Logger):
         if self.training_step % self.config.save_state_frequency == 0:
           self.save_state()
 
-        if self.verbose or self.log and self.training_step % self.config.learner_log_frequency == 0:
+        if self.training_step % self.config.learner_log_frequency == 0:
           reward_loss = self.losses_to_log['reward'] / self.config.learner_log_frequency
           value_loss = self.losses_to_log['value'] / self.config.learner_log_frequency
           policy_loss = self.losses_to_log['policy'] / self.config.learner_log_frequency
-          self.update_throughput()
 
           self.losses_to_log['reward'] = 0
           self.losses_to_log['value'] = 0
           self.losses_to_log['policy'] = 0
 
-          if self.verbose:
-            print("\ntraining step: {}".format(self.training_step))
-            print("reward loss: {}".format(reward_loss))
-            print("value loss: {}".format(value_loss))
-            print("policy loss: {}".format(policy_loss))
-            print("throughput: learner={:.0f}, actors={:.0f}".format(self.throughput['ups'], 
-                                                                     self.throughput['fps']))
+          self.log_scalar(tag='loss/reward', value=reward_loss, i=self.training_step)
+          self.log_scalar(tag='loss/value', value=value_loss, i=self.training_step)
+          self.log_scalar(tag='loss/policy', value=policy_loss, i=self.training_step)
+          self.log_throughput()
 
-          if self.log and self.training_step % self.config.learner_log_frequency == 0:
-            self.log_scalar(tag='loss/reward', value=reward_loss, i=self.training_step)
-            self.log_scalar(tag='loss/value', value=value_loss, i=self.training_step)
-            self.log_scalar(tag='loss/policy', value=policy_loss, i=self.training_step)
-            self.log_scalar(tag='throughput/frames_per_second', value=self.throughput['fps'], i=self.training_step)
-            self.log_scalar(tag='throughput/updates_per_second', value=self.throughput['ups'], i=self.training_step)
-            self.log_scalar(tag='throughput/replay_ratio', value=self.throughput['replay_ratio'], i=self.training_step)
-            self.log_scalar(tag='throughput/sample_ratio', value=self.throughput['sample_ratio'], i=self.training_step)
-            self.log_scalar(tag='throughput/total_frames', value=self.throughput['total_frames'], i=self.training_step)
-            self.log_scalar(tag='games/finished', value=self.throughput['total_games'], i=self.training_step)
+          if self.lr_scheduler is not None:
+            self.log_scalar(tag='loss/learning_rate', value=self.lr_scheduler.lr, i=self.training_step)
 
-            if self.lr_scheduler is not None:
-              self.log_scalar(tag='loss/learning_rate', value=self.lr_scheduler.lr, i=self.training_step)
-
-            if self.config.debug:
-              total_grad_norm = 0
-              for name, weights in self.network.named_parameters():
-                self.log_histogram(weights.grad.data.cpu().numpy(), 'gradients' + '/' + name + '_grad', self.training_step)
-                self.log_histogram(weights.data.cpu().numpy(), 'network_weights' + '/' + name, self.training_step)
-                total_grad_norm += weights.grad.data.norm(2).item() ** 2
-              total_grad_norm = total_grad_norm ** (1. / 2)
-              self.log_scalar(tag='total_gradient_norm', value=total_grad_norm, i=self.training_step)
-
-        if self.config.sampling_ratio:
-          throughput = self.calculate_throughput()
-          ratio = (throughput['learner'] / throughput['actors'])
-          if ratio > self.config.sampling_ratio:
-            self.sleep += 0.0001
-          elif ratio < self.config.sampling_ratio:
-            self.sleep = max(0, self.sleep - 0.0001)
-          time.sleep(self.sleep)
-
-    self.send_weights()
+          if self.config.debug:
+            total_grad_norm = 0
+            for name, weights in self.network.named_parameters():
+              self.log_histogram(weights.grad.data.cpu().numpy(), 'gradients' + '/' + name + '_grad', self.training_step)
+              self.log_histogram(weights.data.cpu().numpy(), 'network_weights' + '/' + name, self.training_step)
+              total_grad_norm += weights.grad.data.norm(2).item() ** 2
+            total_grad_norm = total_grad_norm ** (1. / 2)
+            self.log_scalar(tag='total_gradient_norm', value=total_grad_norm, i=self.training_step)
 
   def update_weights(self, batch):
     batch, idxs, is_weights = batch
@@ -163,7 +172,7 @@ class Learner(Logger):
 
     target_rewards, target_values, target_policies = targets
 
-    if self.config.norm_states:
+    if self.config.norm_obs:
       observations = (observations - self.obs_min) / self.obs_range
     observations = torch.from_numpy(observations).to(self.device)
 
@@ -221,12 +230,11 @@ class Learner(Logger):
     if self.lr_scheduler is not None:
       self.lr_scheduler.step()
 
-    if self.log:
-      self.losses_to_log['reward'] += reward_loss.detach().cpu().item()
-      self.losses_to_log['value'] += value_loss.detach().cpu().item()
-      self.losses_to_log['policy'] += policy_loss.detach().cpu().item()
+    self.losses_to_log['reward'] += reward_loss.detach().cpu().item()
+    self.losses_to_log['value'] += value_loss.detach().cpu().item()
+    self.losses_to_log['policy'] += policy_loss.detach().cpu().item()
 
   def launch(self):
-    print("Learner is online.")
+    print("Learner is online on {}.".format(self.device))
     self.learn()
 

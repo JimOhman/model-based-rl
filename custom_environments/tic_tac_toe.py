@@ -69,7 +69,5 @@ class TicTacToe():
     return win
 
   def render(self, mode=''):
-    print()
-    print(self.prev_board.reshape(3,3))
-    print()
+    print("\n{}\n".format(self.prev_board.reshape(3,3)))
 

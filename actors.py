@@ -10,97 +10,83 @@ import time
 import torch
 import ray
 import random
+import os
 
 
-@ray.remote(num_cpus=1)
+@ray.remote
 class Actor(Logger):
 
-  def __init__(self, worker_id, config, storage, replay_buffer, state=None, run_tag=None, date=None):
-    set_all_seeds(config.seed + worker_id if config.seed is not None else None)
+  def __init__(self, actor_key, config, storage, replay_buffer, state=None):
+    set_all_seeds(config.seed + actor_key if config.seed is not None else None)
 
-    self.run_tag = run_tag
+    self.run_tag = config.run_tag
     self.group_tag = config.group_tag
-    self.worker_id = 'actor-{}'.format(worker_id)
+    self.actor_key = actor_key
     self.config = deepcopy(config)
     self.storage = storage
     self.replay_buffer = replay_buffer
 
-    self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     self.environment = get_environment(config)
-    if config.seed is not None:
-      self.environment.seed(config.seed)
-
+    self.environment.seed(config.seed)
     self.mcts = MCTS(config)
 
+    if "actors" in self.config.use_gpu_for:
+      if torch.cuda.is_available():
+        if self.config.actors_gpu_device_ids is not None:
+          device_id = self.config.actors_gpu_device_ids[self.actor_key]
+          self.device = torch.device("cuda:{}".format(device_id))
+        else:
+          self.device = torch.device("cuda")
+      else:
+        raise RuntimeError("GPU was requested but torch.cuda.is_available() is False.")
+    else:
+      self.device = torch.device("cpu")
+
     self.network = get_network(config, self.device)
+    self.network.to(self.device)
     self.network.eval()
 
     if config.fixed_temperatures:
-      self.fixed_temperature = config.fixed_temperatures[worker_id]
-      self.worker_id = 'actor-{}/temp={}'.format(worker_id, round(self.fixed_temperature, 1))
+      self.temperature = config.fixed_temperatures[self.actor_key]
+      self.worker_id = 'actors/temp={}'.format(round(self.temperature, 1))
     else:
-      self.fixed_temperature = None
+      self.worker_id = 'actor-{}'.format(self.actor_key)
 
-    if self.config.norm_states:
-      self.obs_min = np.array(self.config.state_range[::2], dtype=np.float32)
-      self.obs_max = np.array(self.config.state_range[1::2], dtype=np.float32)
+    if self.config.norm_obs:
+      self.obs_min = np.array(self.config.obs_range[::2], dtype=np.float32)
+      self.obs_max = np.array(self.config.obs_range[1::2], dtype=np.float32)
       self.obs_range = self.obs_max - self.obs_min
 
-    self.training_step, self.games_played = 0, 0
-    self.return_to_log, self.length_to_log = 0, 0
-    self.value_to_log = 0
     if self.config.two_players:
       self.stats_to_log = defaultdict(int)
 
-    if state is not None:
-      self.load_state(state, date)
-
-    self.verbose = True if 'actors' in self.config.verbose else False
-    self.log = True if 'actors' in self.config.log else False
-
-    self.histories = []
     self.experiences_collected = 0
-    self.prev_revisit_step = 0
+    self.training_step = 0
+    self.games_played = 0
+    self.return_to_log = 0
+    self.length_to_log = 0
+    self.value_to_log = 0
+
+    if state is not None:
+      self.load_state(state)
 
     Logger.__init__(self)
 
-  def revisit_history(self):
-    game = self.config.new_game(self.environment)
-
-    idx, priority, step, history = ray.get(self.replay_buffer.get_max_history.remote())
-
-    game.history.observations.append(history.observations[step])
-    game.environment._elapsed_steps = history.steps[step]
-    game.step = history.steps[step]
-    game.environment.unwrapped.restore_state(history.env_states[step].copy())
-
-    self.play_game(game)
-
-    self.prev_revisit_step = self.games_played
-
-    if self.log:
-      self.log_scalar(tag='revisit/priority', value=priority, i=self.games_played)
-      self.log_scalar(tag='revisit/step', value=history.steps[step], i=self.games_played)
-      self.log_scalar(tag='revisit/length', value=game.step, i=self.games_played)
-      self.log_scalar(tag='revisit/return', value=game.sum_rewards, i=self.games_played)
-      self.log_scalar(tag='revisit/value', value=(game.sum_values/game.history_idx), i=self.games_played)
-
-  def load_state(self, state, date):
+  def load_state(self, state):
+    self.run_tag = os.path.join(self.run_tag, 'resumed', '{}'.format(state['training_step']))
     self.network.load_state_dict(state['weights'])
-    self.training_step = state['step']
-    old_run_tag = state['dirs']['base'].split('{}'.format(self.config.group_tag))[1][1:]
-    self.run_tag = old_run_tag + '_resumed_' + date
+    self.training_step = state['training_step']
+    self.games_played = state['actor_games'][self.actor_key]
 
   def sync_weights(self, force=False):
-    weights, training_step = ray.get(self.storage.latest_weights.remote())
-    if training_step != self.training_step:
+    weights, training_step = ray.get(self.storage.get_weights.remote(self.games_played, self.actor_key))
+    if training_step != self.training_step or force:
       self.network.load_weights(weights)
       self.training_step = training_step
-    elif force:
-      self.network.load_weights(weights)
 
   def run_selfplay(self):
-    while ray.get(self.storage.latest_weights.remote())[0] is None:
+
+    while not ray.get(self.storage.is_ready.remote()):
       time.sleep(1)
 
     self.sync_weights(force=True)
@@ -115,13 +101,7 @@ class Actor(Logger):
       self.length_to_log += game.step
       self.games_played += 1
 
-      if self.verbose:
-        date = datetime.datetime.now(tz=pytz.timezone('Europe/Stockholm')).strftime("%d-%b-%Y_%H:%M:%S")
-        msg = "{}: [{}] Step {}, Game {} --> length: {}, return: {}"
-        print(msg.format(self.worker_id.capitalize(), date, self.training_step,
-                         self.games_played, game.step, game.sum_rewards))
-
-      if self.log and self.games_played % self.config.actor_log_frequency == 0:
+      if self.games_played % self.config.actor_log_frequency == 0:
         return_to_log = self.return_to_log / self.config.actor_log_frequency
         length_to_log = self.length_to_log / self.config.actor_log_frequency
         value_to_log = self.value_to_log / self.config.actor_log_frequency
@@ -132,28 +112,23 @@ class Actor(Logger):
         self.length_to_log = 0
         self.value_to_log = 0
 
-      if self.log and self.config.two_players and self.games_played % 100 == 0:
+      if self.config.two_players and self.games_played % 100 == 0:
         value_dict = {key:value/100 for key, value in self.stats_to_log.items()}
         self.log_scalars(group_tag='games/stats', value_dict=value_dict, i=self.games_played)
         self.stats_to_log = defaultdict(int)
 
-      if self.config.revisit:
-        if (self.games_played - self.prev_revisit_step) == self.config.revisit_frequency:
-          self.revisit_history()
-
     self.sync_weights(force=True)
 
   def play_game(self, game):
-    if self.fixed_temperature is None:
-      temperature = self.config.visit_softmax_temperature(self.training_step)
-    else:
-      temperature = self.fixed_temperature
+
+    if self.config.fixed_temperatures is not None:
+      self.temperature = self.config.visit_softmax_temperature(self.training_step)
 
     while not game.terminal:
       root = Node(0)
 
       current_observation = np.float32(game.get_observation(-1))
-      if self.config.norm_states:
+      if self.config.norm_obs:
         current_observation = (current_observation - self.obs_min) / self.obs_range
       current_observation = torch.from_numpy(current_observation).to(self.device)
 
@@ -168,7 +143,7 @@ class Actor(Logger):
       error = root.value() - initial_inference.value.item()
       game.history.errors.append(error)
 
-      action = self.config.select_action(root, temperature)
+      action = self.config.select_action(root, self.temperature)
 
       game.apply(action)
       game.store_search_statistics(root)
@@ -197,6 +172,7 @@ class Actor(Logger):
       self.stats_to_log[game.info["result"]] += 1
 
   def launch(self):
-    print("{} is online.".format(self.worker_id.capitalize()))
-    with torch.no_grad():
+    print("{} is online on {}.".format(self.worker_id.capitalize(), self.device))
+    with torch.inference_mode():
       self.run_selfplay()
+

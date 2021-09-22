@@ -40,21 +40,21 @@ Random            |  Trained
 ```bash
 git clone https://github.com/JimOhman/model-based-rl.git
 cd model-based-rl
-pip install -r requirements.txt
+conda create --name muzero-env --file requirements.txt
 ```
 
 ## Reproduce examples:
 
-* LunarLander-v2: ```python train.py --environment LunarLander-v2 --architecture FCNetwork --log actors learner --num_actors 7 
+* LunarLander-v2: ```python train.py --environment LunarLander-v2 --architecture FCNetwork --num_actors 7 
 --fixed_temperatures 1.0 0.8 0.7 0.5 0.3 0.2 0.1 --td_steps 1000 --max_history_length 1000 --group_tag my_group_tag --run_tag my_run_tag```
 
-* Pong-ramNoFrameskip-v4: ```python train.py --environment Pong-ramNoFrameskip-v4 --architecture FCNetwork --log actors learner --num_actors 7 
---fixed_temperatures 1.0 0.8 0.7 0.5 0.3 0.2 0.1 --td_steps 10 --state_range 0 255 --norm_states --sticky_actions 4 --noop_reset --episode_life  --group_tag my_group_tag --run_tag my_run_tag```
+* Pong-ramNoFrameskip-v4: ```python train.py --environment Pong-ramNoFrameskip-v4 --architecture FCNetwork --num_actors 7 
+--fixed_temperatures 1.0 0.8 0.7 0.5 0.3 0.2 0.1 --td_steps 10 --obs_range 0 255 --norm_obs --sticky_actions 4 --noop_reset --episode_life  --group_tag my_group_tag --run_tag my_run_tag```
 
-* Breakout-ramNoFrameskip-v4: ```python train.py --environment Breakout-ramNoFrameskip-v4 --architecture FCNetwork --log actors learner --num_actors 7 
---fixed_temperatures 1.0 0.8 0.7 0.5 0.3 0.2 0.1 --td_steps 10 --window_size 200000 --batch_size 512 --state_range 0 255 --norm_states --sticky_actions 4 --noop_reset --episode_life --fire_reset --clip_rewards --avoid_repeat  --group_tag my_group_tag --run_tag my_run_tag```
+* Breakout-ramNoFrameskip-v4: ```python train.py --environment Breakout-ramNoFrameskip-v4 --architecture FCNetwork --num_actors 7 
+--fixed_temperatures 1.0 0.8 0.7 0.5 0.3 0.2 0.1 --td_steps 10 --window_size 200000 --batch_size 512 --obs_range 0 255 --norm_obs --sticky_actions 4 --noop_reset --episode_life --fire_reset --clip_rewards --group_tag my_group_tag --run_tag my_run_tag```
 
-* Tic-Tac-Toe: ```python train.py --environment tictactoe --two_players --architecture FCNetwork --log actors learner --num_actors 7 --fixed_temperatures 1.0 0.8 0.7 0.5 0.3 0.2 0.1 --td_steps 10 --discount 1 --known_bounds -1 1 --stored_before_train 20000 --group_tag my_group_tag --run_tag my_run_tag```
+* Tic-Tac-Toe: ```python train.py --environment tictactoe --two_players --architecture FCNetwork --num_actors 7 --fixed_temperatures 1.0 0.8 0.7 0.5 0.3 0.2 0.1 --td_steps 10 --discount 1 --known_bounds -1 1 --stored_before_train 20000 --group_tag my_group_tag --run_tag my_run_tag```
 
 See live training results with tensorboard:
 ```bash
@@ -70,25 +70,24 @@ python evaluate.py --saves_dir model-based-rl/runs/(environment)/(group_tag)/(ru
 
 |Network arguments| Description|
 |:-------------|:-------------|
-| `--architecture {FCNetwork, MuZeroNetwork, TinyNetwork}` |Name of an implemented network architecture|
+| `--architecture {FCNetwork, MuZeroNetwork, TinyNetwork, HopfieldNetwork, AttentionNetwork}` |Name of an implemented network architecture|
 | `--value_support` |Min and max of the value support (default: -15 15)|
 | `--reward_support` |Min and max of the reward support (default: -15 15)|
-| `--no_support` |Turn off support|
-| `--seed` |Set the seed for random number generators (default: None)|
+| `--no_support` |Turns off support|
+| `--seed` |Sets the seed for the training run (default: randomly sampled from [0, 10000]|
 
 |Environment arguments| Description|
 |:-------------|:-------------|
 | `--clip_rewards` |Clip rewards to [-1, 1]|
-| `--stack_states` |Stack given amount of consecutive states to a new state (default: 1)|
-| `--state_range` |Specify the value range of features for the state, ex. 0 255 (default: None)|
-| `--norm_states` |Normalize the states based on the given --state_range|
+| `--stack_obs` |Stack given amount of consecutive observations to a new observation (default: 1)|
+| `--obs_range` |Specify the value range of features for observations, ex. 0 255 for images (default: None)|
+| `--norm_obs` |Normalize observations based on the given --obs_range|
 | `--max_episode_steps` |Override the default max_episode_steps of the environment (default: None)|
 | `--sticky_actions` |Apply same action a given amount of times (default: 1)|
 | `--episode_life` |Prevent bootstrapping the value after a loss of a life in Atari games|
 | `--fire_reset` |Apply the FIRE action after a reset call in Atari games|
 | `--noop_reset` |Apply the NOOP action a random amount of times between [0, --noop_max] after a reset call in Atari games|
 | `--noop_max` |Change the maximum for --noop_reset (default: 30)|
-| `--avoid_repeat` |Adds a 5% chance of random action if no reward is observed for 500 steps|
 | `--two_players` |Specifies that the environment is for two-players|
 
 |Self-Play arguments| Description|
@@ -148,15 +147,15 @@ python evaluate.py --saves_dir model-based-rl/runs/(environment)/(group_tag)/(ru
 
 |Evalutation arguments|Description|
 |:-------------|:-------------|
-| `--saves_dir ` |Path to the saves directory which stores the learner states (required)|
-| `--evaluate_nets` |Names of learner states in the given saves directory to compare between (required)|
-| `--games_per_evaluation` |Number of games to evaluate state on. (default: 1)|
+| `--saves_dir ` |Path to the saves directory which has the stored learner states (required)|
+| `--nets` |Names of learner states in the given saves directory to compare between (required)|
+| `--num_games` |Number of games to evaluate state on. (default: 1)|
 | `--plot_summary` |Plot metrics of the games played such as return, predicted value, etc.|
 | `--include_policy` |Include the networks policy in --plot_summary|
 | `--include_bounds` |Include standard deviation bounds in --plot_summary if multiple games are played|
 | `--detailed_label` |Add more information to the legend in the plot|
-| `--smooth` |Smoothen metrics in --plot_summary for better visualization (default: 0)|
-| `--apply_mcts_steps` |Apply a given amount of steps from each MCTS (default: 1)|
+| `--smooth` |A value to smoothen metrics with --plot_summary for better visualization (default: None)|
+| `--apply_mcts_actions` |Apply a given amount of actions from each MCTS (default: 1)|
 | `--parallel` |Evaluate multiple games in parallel by the use of Ray|
 | `--render` |Render the games during evaluation|
 | `--save_gif_as` |Save a gif of a rendered game as the given name|
@@ -167,16 +166,14 @@ python evaluate.py --saves_dir model-based-rl/runs/(environment)/(group_tag)/(ru
 | `--only_prior {0, 1}` |Set as 1 to only use the networks prior to play (default: 0)|
 | `--only_value {0, 1}` |Set as 1 to only use networks value function to play (default: 0)|
 | `--use_exploration_noise {0, 1}` |Set to 1 to include dirichlet noise during evaluation (default: 0)|
-| `--human_opp {0, 1}` |For a two-player game, take control of either player (default: None)|
-| `--random_opp {0, 1}` |For a two-player game, make one opponent random (default: None)|
+| `--human_opp {-1, 1}` |For a two-player game, take control of either player (default: None)|
+| `--random_opp {-1, 1}` |For a two-player game, make one opponent random (default: None)|
 
 |Logging arguments|Description|
 |:-------------|:-------------|
-| `--log {actors, learner}` |Specify actors or learner or both to log training results into tensorboard. (default: None)|
-| `--group_tag ` |An optional tag used to group training runs, used mainly for tensorboard (default: default)|
-| `--run_tag ` |A tag specifying the training run, used mainly for tensorboard (default: auto-generated)|
+| `--group_tag ` |An optional tag used to group training runs (default: None)|
+| `--run_tag ` |A tag specifying the training run, used mainly for tensorboard (default: current-date)|
 
 |Debugging arguments|Description|
 |:-------------|:-------------|
-| `--debug ` |Include weight distributions per training step in tensorboard when --log learner is given|
-| `--verbose {actors, learner}` |Print info about loss and game results during training (default: None)|
+| `--debug ` |Saves the weight distribution and norm to tensorboard|

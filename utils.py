@@ -2,7 +2,7 @@ from wrappers import wrap_game
 from torch.optim.lr_scheduler import ExponentialLR
 from torch.optim import SGD, RMSprop, Adam, AdamW
 from torch.nn import MSELoss, LogSoftmax, SmoothL1Loss
-from networks import MuZeroNetwork, FCNetwork, TinyNetwork
+from networks import MuZeroNetwork, FCNetwork, TinyNetwork, HopfieldNetwork, AttentionNetwork
 import numpy as np
 import random
 import torch
@@ -10,8 +10,8 @@ import gym
 
 
 def get_environment(config):
-    if config.environment == 'tictactoe':
-      from environments.tictactoe import TicTacToe
+    if config.environment == 'TicTacToe':
+      from custom_environments.tic_tac_toe import TicTacToe
       environment = TicTacToe()
     else:
       environment = gym.make(config.environment)
@@ -26,18 +26,26 @@ def get_network(config, device=None):
     action_space = env.action_space.n
 
     if config.architecture == 'MuZeroNetwork':
-      input_channels = config.stack_frames
+      input_channels = config.stack_obs
       if config.stack_actions:
         input_channels *= 2
       network = MuZeroNetwork(input_channels, action_space, device, config)
     elif config.architecture == 'TinyNetwork':
-      input_channels = config.stack_frames
+      input_channels = config.stack_obs
       if config.stack_actions:
         input_channels *= 2
       network = TinyNetwork(input_channels, action_space, device, config)
     elif config.architecture == 'FCNetwork':
       input_dim = np.prod(env.observation_space.shape)
       network = FCNetwork(input_dim, action_space, device, config)
+    elif config.architecture == 'HopfieldNetwork':
+      input_dim = np.prod(env.observation_space.shape)
+      network = HopfieldNetwork(input_dim, action_space, device, config)
+    elif config.architecture == 'AttentionNetwork':
+      input_dim = env.observation_space.shape
+      if len(input_dim) == 1: 
+        input_dim = input_dim[0]
+      network = AttentionNetwork(input_dim, action_space, device, config)
     else:
       raise NotImplementedError
     return network
@@ -92,16 +100,38 @@ class MuZeroLR():
       param_group["lr"] = self.lr
 
 
+class WarmUpLR():
+
+  def __init__(self, optimizer, config):
+    self.optimizer = optimizer
+    self.max_lr = config.lr_init
+    self.warm_up_steps = 5000
+    self.lr_step = 0
+
+    self.lr = (1 / self.warm_up_steps) * self.max_lr
+    for param_group in self.optimizer.param_groups:
+      param_group["lr"] = self.lr
+
+  def step(self):
+    self.lr_step += 1
+    if self.lr_step <= self.warm_up_steps:
+      self.lr = (self.lr_step / self.warm_up_steps) * self.max_lr
+      for param_group in self.optimizer.param_groups:
+        param_group["lr"] = self.lr
+
+
 def get_lr_scheduler(config, optimizer):
-    if config.lr_scheduler == 'ExponentialLR':
-      lr_scheduler = ExponentialLR(optimizer, config.lr_decay_rate)
-    elif config.lr_scheduler == 'MuZeroLR':
-      lr_scheduler = MuZeroLR(optimizer, config)
-    elif config.lr_scheduler == '':
-      lr_scheduler = None
-    else:
-      raise NotImplementedError
-    return lr_scheduler
+  if config.lr_scheduler is None:
+    return None
+  if config.lr_scheduler == 'ExponentialLR':
+    lr_scheduler = ExponentialLR(optimizer, config.lr_decay_rate)
+  elif config.lr_scheduler == 'MuZeroLR':
+    lr_scheduler = MuZeroLR(optimizer, config)
+  elif config.lr_scheduler == 'WarmUpLR':
+    lr_scheduler = WarmUpLR(optimizer, config)
+  else:
+    raise NotImplementedError
+  return lr_scheduler
 
 def set_all_seeds(seed=None):
   if seed is None:

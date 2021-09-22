@@ -20,6 +20,9 @@ class HumanActor():
       self.replay_buffer = []
 
     self.environment = get_environment(config)
+    config.action_space = self.environment.action_space.n
+    config.obs_space = self.environment.observation_space.shape
+
     self.actions = self.environment.action_space.n
 
     if config.seed is not None:
@@ -132,9 +135,11 @@ if __name__ == '__main__':
   args.add_argument('--tag', type=str, default=None)
   args.add_argument('--seed', type=str, default=None)
   args.add_argument('--speed', type=float, default=0.02)
+  args.add_argument('--two_players', action='store_true')
+  args.add_argument('--discount', type=float, default=0.99)
 
   args.add_argument('--wrap_atari', action='store_true')
-  args.add_argument('--stack_frames', type=int, default=1)
+  args.add_argument('--stack_obs', type=int, default=1)
   args.add_argument('--episode_life', action='store_true')
   args.add_argument('--clip_rewards', action='store_true')
   args.add_argument('--sticky_actions', type=int, default=1)
@@ -145,7 +150,6 @@ if __name__ == '__main__':
   args.add_argument('--noop_reset', action='store_true')
   args.add_argument('--noop_max', type=int, default=30)
 
-  args.add_argument('--revisit', action='store_true')
   args.add_argument('--use_q_max', action='store_true')
 
   config = args.parse_args()

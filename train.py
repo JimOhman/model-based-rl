@@ -2,8 +2,8 @@ from shared_storage import SharedStorage
 from replay_buffer import PrioritizedReplay
 from utils import get_environment
 import numpy as np
-from actors import Actor
 from learners import Learner
+from actors import Actor
 from config import make_config
 from copy import deepcopy
 import datetime
@@ -12,29 +12,10 @@ import torch
 import pytz
 import time
 import ray
+import os
 
 
-def launch(config, run_tag, date):
-  ray.init()
-
-  if config.load_state:
-    state = torch.load(config.load_state)
-    if not config.override_loaded_config:
-      config = state['config']
-  else:
-    state = None
-
-  env = get_environment(config)
-  config.action_space = env.action_space.n
-  config.obs_space = env.observation_space.shape
-
-  storage = SharedStorage.remote(config.num_actors)
-  replay_buffer = PrioritizedReplay.remote(config)
-
-  actors = [Actor.remote(actor_id, config, storage, replay_buffer, state, run_tag, date) for actor_id in range(config.num_actors)]
-  learner = Learner.remote(config, storage, replay_buffer, state, run_tag, date)
-  workers = actors + [learner]
-
+def print_launch_message(config, date):
   print("\n\033[92mStarting date: {}\033[0m".format(date))
   print("Using environment: {}.".format(config.environment))
   print("Using architecture: {}.".format(config.architecture))
@@ -59,8 +40,10 @@ def launch(config, run_tag, date):
     print("Using target transform.")
   print("Using {} as policy loss.".format(config.policy_loss))
   if not config.no_support:
-    print("Using value support between {} and {}.".format(config.value_support_min, config.value_support_max))
-    print("Using reward support between {} and {}.".format(config.reward_support_min, config.reward_support_max))
+    print("Using value support between {} and {}.".format(config.value_support_min,
+                                                          config.value_support_max))
+    print("Using reward support between {} and {}.".format(config.reward_support_min,
+                                                           config.reward_support_max))
     print("Using {} as value and reward loss.".format(config.policy_loss))
   else:
     print("Using {} as value and reward loss.".format(config.scalar_loss))
@@ -69,36 +52,43 @@ def launch(config, run_tag, date):
   print("Using {} simulations per step.".format(config.num_simulations))
   print("Using td-steps {}.".format(config.td_steps))
   print("Using {} actors.".format(config.num_actors))
-  if config.sampling_ratio:
-    print("Using sampling ratio: {}.".format(config.sampling_ratio))
-
+  if config.fixed_temperatures:
+    print("   - with fixed temperatures: {}".format(config.fixed_temperatures))
+  else:
+    print("   - with dynamic temperatures: {}".format(config.visit_softmax_temperatures))
+    print("   - changing at training steps: {}".format(config.visit_softmax_steps))
   print("\033[92mLaunching...\033[0m\n")
 
+def launch(config, date, state=None):
+  os.environ["OMP_NUM_THREADS"] = "1"
+  ray.init()
+
+  env = get_environment(config)
+  config.action_space = env.action_space.n
+  config.obs_space = env.observation_space.shape
+
+  storage = SharedStorage.remote(config)
+  replay_buffer = PrioritizedReplay.remote(config)
+  actors = [Actor.remote(actor_key, config, storage, replay_buffer, state) for actor_key in range(config.num_actors)]
+  learner = Learner.remote(config, storage, replay_buffer, state)
+  workers = [learner] + actors
+
+  print_launch_message(config, date)
   ray.get([worker.launch.remote() for worker in workers])
   ray.shutdown()
 
-
-def get_run_tag(meta_config, config, date):
-  if meta_config.run_tag is None:
-    if meta_config.group_tag != 'default':
-      run_tag = ''
-      run_tag = '{}'.format(config.architecture)
-      run_tag += '/seed={}'.format(config.seed)
-      run_tag += '/num_actors={}'.format(config.num_actors)
-      run_tag += '/lr={}'.format(config.lr_init)
-      run_tag += '/discount={}'.format(config.discount)
-      run_tag += '/window_size={}'.format(config.window_size)
-      run_tag += '/batch_size={}'.format(config.batch_size)
-      run_tag += '/td_steps={}'.format(config.td_steps)
-      run_tag += '/num_simulations={}'.format(config.num_simulations)
-      run_tag += '/num_unroll_steps={}'.format(config.num_unroll_steps)
-      run_tag += '/' + date
-    else:
-      run_tag = date
-  else:
-    run_tag = config.run_tag
-  return run_tag
-
+def set_tags(meta_config, config):
+  tz = pytz.timezone(config.time_zone)
+  date = datetime.datetime.now(tz=tz).strftime("%d-%b-%Y_%H-%M-%S")
+  if config.run_tag is None:
+    run_tag = ''
+    if meta_config.create_run_tag_from:
+      for key in meta_config.create_run_tag_from:
+        tag = "{}={}".format(key, getattr(config, key))
+        run_tag = os.path.join(run_tag, tag)
+    run_tag = os.path.join(run_tag, date)
+    config.run_tag = run_tag
+  return date
 
 def config_generator(meta_config):
   for seed in meta_config.seed:
@@ -114,8 +104,8 @@ def config_generator(meta_config):
 
                       config = deepcopy(meta_config)
 
-                      if config.seed is None:
-                        config.seed = np.random.randint(1000)
+                      if seed is None:
+                        config.seed = np.random.randint(10000)
                       else:
                         config.seed = seed
 
@@ -129,17 +119,20 @@ def config_generator(meta_config):
                       config.window_step = window_step
                       config.td_steps = td_steps
 
-                      yield config
+                      date = set_tags(meta_config, config)
+
+                      yield config, date
 
 
 if __name__ == '__main__':
-  import os
-  os.environ["OMP_NUM_THREADS"] = "1"
-
   meta_config = make_config()
-  
-  for config in config_generator(meta_config):
-    date = datetime.datetime.now(tz=pytz.timezone('Europe/Stockholm')).strftime("%d-%b-%Y_%H-%M-%S")
-    run_tag = get_run_tag(meta_config, config, date)
 
-    launch(config, run_tag, date)
+  if meta_config.load_state:
+    tz = pytz.timezone(meta_config.time_zone)
+    date = datetime.datetime.now(tz=tz).strftime("%d-%b-%Y_%H-%M-%S")
+    state = torch.load(meta_config.load_state, map_location='cpu')
+    launch(state['config'], date, state=state)
+  else:
+    for config, date in config_generator(meta_config):
+      launch(config, date)
+

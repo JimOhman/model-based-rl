@@ -58,7 +58,6 @@ class Game(object):
     self.clip_rewards = config.clip_rewards
     self.sticky_actions = config.sticky_actions
     self.use_q_max = config.use_q_max
-    self.revisit = config.revisit
     self.two_players = config.two_players
     self.action_space = range(config.action_space)
     self.discount = config.discount
@@ -73,29 +72,15 @@ class Game(object):
     self.sum_rewards = 0
     self.sum_values = 0
     self.step = 0
-    self.to_play = 0
+    self.to_play = 1
 
-    self.avoid_repeat = config.avoid_repeat
-    self.non_zero_reward_step = 0
     self.info = {}
 
   def apply(self, action):
 
     self.history.steps.append(self.step)
 
-    if self.revisit:
-      env_state = self.environment.unwrapped.clone_state()
-      self.history.env_states.append(env_state)
-
-    if self.avoid_repeat:
-      if (self.environment._elapsed_steps - self.non_zero_reward_step) > 500:
-          if np.random.rand() < 0.05:
-            action = np.random.randint(self.environment.action_space.n)
-
     observation, reward, done, info = self.environment.step(action)
-
-    if reward != 0:
-      self.non_zero_reward_step = self.environment._elapsed_steps
 
     self.sum_rewards += self.environment.last_reward if self.clip_rewards else reward
 
@@ -116,7 +101,7 @@ class Game(object):
     self.info = info
     
     if self.two_players:
-      self.to_play = (self.to_play + 1) % 2
+      self.to_play *= -1
 
   def store_search_statistics(self, root):
     sum_visits = sum(child.visit_count for child in root.children.values())

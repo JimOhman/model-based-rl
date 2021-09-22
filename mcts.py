@@ -10,8 +10,8 @@ class MinMaxStats(object):
     self.maximum = -float('inf') if maximum_bound is None else maximum_bound
 
   def update(self, value: float):
-    self.maximum = max(self.maximum, value)
     self.minimum = min(self.minimum, value)
+    self.maximum = max(self.maximum, value)
 
   def normalize(self, value: float) -> float:
     if self.maximum > self.minimum:
@@ -34,7 +34,7 @@ class Node(object):
     self.reward = 0
     self.children = {}
     self.prior = prior
-    self.to_play = 0
+    self.to_play = 1
 
   def expanded(self):
     return len(self.children) > 0
@@ -89,7 +89,7 @@ class MCTS(object):
         search_path.append(node)
 
         if self.two_players:
-          to_play = (to_play + 1) % 2
+          to_play *= -1
 
       parent = search_path[-2]
 
