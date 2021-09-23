@@ -144,13 +144,10 @@ if __name__ == '__main__':
   args.add_argument('--clip_rewards', action='store_true')
   args.add_argument('--sticky_actions', type=int, default=1)
   args.add_argument('--default_action', type=int, default=0)
-  args.add_argument('--max_episode_steps', type=int, default=None)
 
   args.add_argument('--fire_reset', action='store_true')
   args.add_argument('--noop_reset', action='store_true')
   args.add_argument('--noop_max', type=int, default=30)
-
-  args.add_argument('--use_q_max', action='store_true')
 
   config = args.parse_args()
 

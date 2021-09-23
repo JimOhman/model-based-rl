@@ -57,7 +57,6 @@ class Game(object):
     self.episode_life = config.episode_life
     self.clip_rewards = config.clip_rewards
     self.sticky_actions = config.sticky_actions
-    self.use_q_max = config.use_q_max
     self.two_players = config.two_players
     self.action_space = range(config.action_space)
     self.discount = config.discount
@@ -108,17 +107,7 @@ class Game(object):
     self.history.child_visits.append([
       root.children[a].visit_count/sum_visits if a in root.children else 0
       for a in self.action_space])
-    if not self.use_q_max:
-      value = root.value()
-    else:
-      q_values = []
-      for child in root.children.values():
-        if self.two_players:
-          q_value = child.reward - self.discount*child.value()
-        else:
-          q_value = child.reward + self.discount*child.value()
-        q_values.append(q_value)
-      value = max(q_values)
+    value = root.value()
     self.history.root_values.append(value)
     self.sum_values += value
 

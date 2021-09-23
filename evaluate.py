@@ -96,12 +96,12 @@ class SummaryTools(object):
     average_search_depth, std_search_depth = np.mean(search_depths), np.std(search_depths)
 
     print("\n\033[92mEvaluation finished! - label: ({})\033[0m".format(self.config.label))
-    print("   Average length: {:.1f}({:.1f})".format(average_length, std_lengths))
-    print("   Average return: {:.1f}({:.1f})".format(average_return, std_return))
-    print("   Average predicted return: {:.1f}({:.1f})".format(average_pred_return, std_pred_return))
-    print("   Average predicted value: {:.1f}({:.1f})".format(average_pred_value, std_pred_value))
-    print("   Average mcts value: {:.1f}({:.1f})".format(average_root_value, std_root_value))
-    print("   Average search depth: {:.1f}({:.1f})\n".format(average_search_depth, std_search_depth))
+    print("Average length: {:.1f}({:.1f})".format(average_length, std_lengths))
+    print("Average return: {:.1f}({:.1f})".format(average_return, std_return))
+    print("Average predicted return: {:.1f}({:.1f})".format(average_pred_return, std_pred_return))
+    print("Average predicted value: {:.1f}({:.1f})".format(average_pred_value, std_pred_value))
+    print("Average mcts value: {:.1f}({:.1f})".format(average_root_value, std_root_value))
+    print("Average search depth: {:.1f}({:.1f})\n".format(average_search_depth, std_search_depth))
 
   def get_quantiles(self, values, smooth=None):
       max_len = len(max(values, key=len))

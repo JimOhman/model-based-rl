@@ -117,7 +117,6 @@ def make_config():
   environment_modifications.add_argument('--stack_obs', type=int, default=1)
   environment_modifications.add_argument('--obs_range', nargs='+', type=float, default=None)
   environment_modifications.add_argument('--norm_obs', action='store_true')
-  environment_modifications.add_argument('--max_episode_steps', type=int, default=None)
   environment_modifications.add_argument('--sticky_actions', type=int, default=1)
   environment_modifications.add_argument('--episode_life', action='store_true')
   environment_modifications.add_argument('--fire_reset', action='store_true')
@@ -176,7 +175,6 @@ def make_config():
   training.add_argument('--clip_grad', type=int, default=0)
   training.add_argument('--no_target_transform', action='store_true')
   training.add_argument('--discount', nargs='+', type=float, default=[0.997])
-  training.add_argument('--use_q_max', action='store_true')
   training.add_argument('--use_gpu_for', nargs='+', choices=['actors', 'learner'], type=str, default='')
   training.add_argument('--learner_gpu_device_id', type=int, default=None)
   training.add_argument('--actors_gpu_device_ids', nargs='+', type=int, default=None)
@@ -188,7 +186,7 @@ def make_config():
 
   # Learning rate
   training.add_argument('--lr_init', nargs='+', type=float, default=[0.0008])
-  training.add_argument('--lr_scheduler', type=str, default=None)
+  training.add_argument('--lr_scheduler', choices=['ExponentialLR', 'MuZeroLR', 'WarmUpLR'], type=str, default=None)
   training.add_argument('--lr_decay_rate', type=float, default=0.1)
   training.add_argument('--lr_decay_steps', type=int, default=100000)
 

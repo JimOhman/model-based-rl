@@ -40,6 +40,9 @@ class TicTacToe():
 
   def legal_actions(self):
     return np.where(self.board==0)[0]
+
+  def seed(self, seed):
+    return
   
   def reset(self):
     self.board = np.zeros(9, dtype=np.int32)
