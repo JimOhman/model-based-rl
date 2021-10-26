@@ -65,7 +65,7 @@ class Actor(Logger):
     self.games_played = 0
     self.return_to_log = 0
     self.length_to_log = 0
-    self.value_to_log = 0
+    self.value_to_log = {'avg': 0, 'max': 0}
 
     if state is not None:
       self.load_state(state)
@@ -96,7 +96,8 @@ class Actor(Logger):
 
       self.play_game(game)
 
-      self.value_to_log += (game.sum_values/game.history_idx)
+      self.value_to_log['avg'] += (game.sum_values/game.history_idx)
+      self.value_to_log['max'] += game.max_value
       self.return_to_log += game.sum_rewards
       self.length_to_log += game.step
       self.games_played += 1
@@ -104,13 +105,16 @@ class Actor(Logger):
       if self.games_played % self.config.actor_log_frequency == 0:
         return_to_log = self.return_to_log / self.config.actor_log_frequency
         length_to_log = self.length_to_log / self.config.actor_log_frequency
-        value_to_log = self.value_to_log / self.config.actor_log_frequency
+        avg_value_to_log = self.value_to_log['avg'] / self.config.actor_log_frequency
+        max_value_to_log = self.value_to_log['max'] / self.config.actor_log_frequency
         self.log_scalar(tag='games/return', value=return_to_log, i=self.games_played)
         self.log_scalar(tag='games/length', value=length_to_log, i=self.games_played)
-        self.log_scalar(tag='games/value', value=value_to_log, i=self.games_played)
+        self.log_scalar(tag='games/avg_value', value=avg_value_to_log, i=self.games_played)
+        self.log_scalar(tag='games/max_value', value=max_value_to_log, i=self.games_played)
+        self.value_to_log['avg'] = 0
+        self.value_to_log['max'] = 0
         self.return_to_log = 0
         self.length_to_log = 0
-        self.value_to_log = 0
 
       if self.config.two_players and self.games_played % 100 == 0:
         value_dict = {key:value/100 for key, value in self.stats_to_log.items()}

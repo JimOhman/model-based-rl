@@ -247,7 +247,6 @@ def get_evaluation_args():
   parser.add_argument('--sleep', type=float, default=0)
   parser.add_argument('--human_opp', type=int, choices=[-1, 1], default=None)
   parser.add_argument('--random_opp', type=int, choices=[-1, 1], default=None)
-  parser.add_argument('--clip_rewards', action='store_true')
   parser.add_argument('--plot_summary', action='store_true')
   parser.add_argument('--include_bounds', action='store_true')
   parser.add_argument('--include_policy', action='store_true')

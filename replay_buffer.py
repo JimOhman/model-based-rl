@@ -207,3 +207,4 @@ class PrioritizedReplay():
 
   def get_throughput(self):
     return self.throughput
+

@@ -24,11 +24,6 @@ class Learner(Logger):
     self.storage = storage
     self.config = deepcopy(config)
 
-    if torch.cuda.is_available() and ray.get_gpu_ids():
-      self.device = torch.device("cuda")
-    else:
-      self.device = torch.device("cpu")
-
     if "learner" in self.config.use_gpu_for:
       if torch.cuda.is_available():
         if self.config.learner_gpu_device_id is not None:

@@ -151,7 +151,7 @@ class FCNetwork(BaseNetwork):
   def prediction(self, hidden_state):
     value = self.value_head(hidden_state)
     if not self.training and not self.no_support:
-        value = self.inverse_value_transform(value)
+      value = self.inverse_value_transform(value)
     policy = self.policy_head(hidden_state)
     return policy, value
 
@@ -159,7 +159,7 @@ class FCNetwork(BaseNetwork):
     hidden_state_with_action = self.attach_action(hidden_state, action)
     reward = self.reward_head(hidden_state_with_action)
     if not self.training and not self.no_support:
-        reward = self.inverse_reward_transform(reward)
+      reward = self.inverse_reward_transform(reward)
     next_hidden_state = self.transition_head(hidden_state_with_action)
     next_hidden_state = F.relu(self.LN(next_hidden_state))
     return next_hidden_state, reward

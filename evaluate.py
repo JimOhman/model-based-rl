@@ -156,10 +156,7 @@ class SummaryTools(object):
   def plot_summary(self, games, args, axes=None):
     axes = self.get_axes(args) if axes is None else axes
 
-    if args.clip_rewards:
-      rewards = [np.sign(game.history.rewards) for game in games]
-    else:
-      rewards = [game.history.rewards for game in games]
+    rewards = [game.history.rewards for game in games]
 
     pred_rewards = [game.pred_rewards for game in games]
 
@@ -214,6 +211,7 @@ class Evaluator(SummaryTools):
 
   def __init__(self, state):
     self.config = state['config']
+    self.state = state
 
     if self.config.use_gpu:
       if torch.cuda.is_available():
@@ -236,9 +234,10 @@ class Evaluator(SummaryTools):
 
   def load_network(self):
     self.network = get_network(self.config, self.device)
-    self.network.load_state_dict(state["weights"])
+    self.network.load_state_dict(self.state["weights"])
     self.network.to(self.device)
     self.network.eval()
+    self.state = None
 
   def play_game(self, environment):
     assert self.network is not None, ".load_network() needs to be called before playing."
@@ -315,16 +314,16 @@ class Evaluator(SummaryTools):
         node = root
         actions_applied = 0
         while node.expanded():
-          action = self.config.select_action(root, temperature=self.config.temperature)
+          action = self.config.select_action(node, temperature=self.config.temperature)
           reward = node.children[action].reward
+          node = node.children[action]
+
           actions_to_apply.append(action)
           corresponding_rewards.append(reward)
-
           actions_applied += 1
+
           if actions_applied == self.config.apply_mcts_actions:
             break
-
-          node = node.children[action]
 
       game.pred_values.append(initial_inference.value.item())
       game.store_search_statistics(root)
@@ -436,11 +435,6 @@ def state_generator(args):
                     state['config'].label = get_label(state, args.detailed_label, path_idx)
                     state['config'].use_gpu = args.use_gpu
                     state['config'].verbose = args.verbose
-
-                    ### Back-comp
-                    #state['config'].norm_obs = state['config'].norm_states
-                    #state['config'].obs_range = state['config'].state_range
-                    #state['config'].stack_obs = state['config'].stack_frames
 
                     yield state
 

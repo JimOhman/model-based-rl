@@ -70,6 +70,7 @@ class Game(object):
     self.history_idx = 0
     self.sum_rewards = 0
     self.sum_values = 0
+    self.max_value = -np.inf
     self.step = 0
     self.to_play = 1
 
@@ -110,6 +111,8 @@ class Game(object):
     value = root.value()
     self.history.root_values.append(value)
     self.sum_values += value
+    if value > self.max_value:
+      self.max_value = value
 
   def get_observation(self, state_index):
     if not self.history.observations:
