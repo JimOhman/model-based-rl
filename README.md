@@ -137,6 +137,11 @@ python evaluate.py --saves_dir model-based-rl/runs/(environment)/(group_tag)/(ru
 | `--lr_decay_rate` |Decay rate for learning rate schedulers that use it (default: 0.01)|
 | `--lr_decay_steps` |Training steps until the lr has been reduced by a factor of --decay_rate (default: 100000)|
 
+|Reanalyse arguments| Description|
+|:-------------|:-------------|
+| `--no_reanalyze_support` |Disable reanalyse support while training (default: True)|
+| `--reanalyze_batch_size` |Batch size of histories to reanalyze (default: 32)|
+
 |Saving and Loading arguments|Description|
 |:-------------|:-------------|
 | `--save_state_frequency` |Training steps before agents state is saved (default: 1000)|

@@ -1,10 +1,12 @@
 import numpy as np
 import os
+
 os.environ.setdefault('PATH', '')
 from collections import deque
 import gym
 from gym import spaces
 import cv2
+
 cv2.ocl.setUseOpenCL(False)
 
 
@@ -180,10 +182,11 @@ class StickyActions(gym.Wrapper):
     def reset(self, **kwargs):
         return self.env.reset(**kwargs)
 
+
 class MaxAndSkipEnv(gym.Wrapper):
     def __init__(self, env, frame_skip):
         gym.Wrapper.__init__(self, env)
-        self.obs_buffer = np.zeros((2,)+env.observation_space.shape, dtype=np.uint8)
+        self.obs_buffer = np.zeros((2,) + env.observation_space.shape, dtype=np.uint8)
         self._skip = frame_skip
 
     @property
@@ -281,7 +284,8 @@ class FrameActionStack(gym.Wrapper):
         self.k = 2 * stack_frames
         self.frames = deque([], maxlen=self.k)
         shp = env.observation_space.shape
-        self.observation_space = spaces.Box(low=0, high=255, shape=(self.k, *shp[:-1]), dtype=env.observation_space.dtype)
+        self.observation_space = spaces.Box(low=0, high=255, shape=(self.k, *shp[:-1]),
+                                            dtype=env.observation_space.dtype)
 
     @property
     def _elapsed_steps(self):
@@ -302,7 +306,7 @@ class FrameActionStack(gym.Wrapper):
 
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
-        act_plane = np.full_like(obs, 255*(action/self.env.action_space.n), dtype=np.uint8)
+        act_plane = np.full_like(obs, 255 * (action / self.env.action_space.n), dtype=np.uint8)
         self.frames.append(act_plane)
         self.frames.append(obs)
         return self._get_ob(), reward, done, info
@@ -318,7 +322,8 @@ class AtariFrameStack(gym.Wrapper):
         self.k = stack_frames
         self.frames = deque([], maxlen=self.k)
         shp = env.observation_space.shape
-        self.observation_space = spaces.Box(low=0, high=255, shape=(self.k, shp[:-1]), dtype=env.observation_space.dtype)
+        self.observation_space = spaces.Box(low=0, high=255, shape=(self.k, shp[:-1]),
+                                            dtype=env.observation_space.dtype)
 
     @property
     def _elapsed_steps(self):
@@ -386,7 +391,7 @@ class StackFrames(gym.Wrapper):
     def _get_ob(self):
         assert len(self.frames) == self.k
         return LazyFrames(list(self.frames))
-        
+
 
 class LazyFrames(object):
     def __init__(self, frames):
@@ -443,6 +448,7 @@ def wrap_atari(env, config):
 
     return env
 
+
 def wrap_game(env, config):
     if config.wrap_atari:
         env = wrap_atari(env, config)
@@ -464,10 +470,7 @@ def wrap_game(env, config):
             env = ClipRewardEnv(env)
 
     if not hasattr(env, 'legal_actions'):
-      legal_actions = range(env.action_space.n)
-      env.legal_actions = lambda: legal_actions
+        legal_actions = range(env.action_space.n)
+        env.legal_actions = lambda: legal_actions
 
     return env
-
-
-
