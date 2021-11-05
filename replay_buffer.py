@@ -1,3 +1,5 @@
+from operator import itemgetter
+
 import numpy as np
 import random
 import ray
@@ -103,12 +105,18 @@ class PrioritizedReplay():
       np.random.seed(config.seed)
       random.seed(config.seed+1)
 
+    self.reanalyze_batch_size = config.reanalyze_batch_size
+
   def add_initial_throughput(self, frames, games):
     self.throughput['frames'] += frames
     self.throughput['games'] += games
 
   def get_priorities(self, errors):
     return np.power((np.abs(errors) + self.epsilon), self.alpha)
+
+  def update_game_history(self, histories):
+    for _, history in histories.values():
+      self.tree.add(self.get_priorities(history.errors), history)
 
   def save_history(self, history, ignore=None, terminal=False):
     if ignore is not None:
@@ -120,6 +128,16 @@ class PrioritizedReplay():
 
     self.throughput['frames'] += len(priorities)
     if terminal: self.throughput['games'] += 1
+
+  def sample_game(self):
+    result = {}
+    if self.size() >= self.reanalyze_batch_size:
+      values = list(range(self.size()))
+      np.random.shuffle(values)
+      items_to_get = values[:self.reanalyze_batch_size]
+      histories = itemgetter(*items_to_get)(self.tree.buffer)
+      result = dict(zip(values, histories))
+    return result
 
   def sample_batch(self):
     priorities = []

@@ -175,9 +175,15 @@ def make_config():
   training.add_argument('--clip_grad', type=int, default=0)
   training.add_argument('--no_target_transform', action='store_true')
   training.add_argument('--discount', nargs='+', type=float, default=[0.997])
-  training.add_argument('--use_gpu_for', nargs='+', choices=['actors', 'learner'], type=str, default='')
+  training.add_argument('--use_gpu_for', nargs='+', choices=['actors', 'learner', 'reanalyze'], type=str, default='')
   training.add_argument('--learner_gpu_device_id', type=int, default=None)
   training.add_argument('--actors_gpu_device_ids', nargs='+', type=int, default=None)
+
+  # Reanalyze
+  reanalyze = parser.add_argument_group('reanalyze')
+  reanalyze.add_argument('--no_reanalyze_support', action='store_true')
+  reanalyze.add_argument('--reanalyze_batch_size', type=int, default=256)
+  reanalyze.add_argument('--reanalyze_frequency', type=int, default=1000)
 
   # Optimizer
   training.add_argument('--optimizer', choices=['RMSprop', 'Adam', 'AdamW', 'SGD'], type=str, default='AdamW')
@@ -203,6 +209,7 @@ def make_config():
   logging.add_argument('--create_run_tag_from', nargs='+', type=str, default=None)
   logging.add_argument('--actor_log_frequency', type=int, default=1)
   logging.add_argument('--learner_log_frequency', type=int, default=100)
+  logging.add_argument('--reanalyze_log_frequency', type=int, default=1)
   logging.add_argument('--frames_before_fps_log', type=int, default=10000)
 
   ### Debugging

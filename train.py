@@ -2,6 +2,7 @@ from shared_storage import SharedStorage
 from replay_buffer import PrioritizedReplay
 from utils import get_environment
 import numpy as np
+from reanalyze import Reanalyze
 from learners import Learner
 from actors import Actor
 from config import make_config
@@ -72,6 +73,10 @@ def launch(config, date, state=None):
   actors = [Actor.remote(actor_key, config, storage, replay_buffer, state) for actor_key in range(config.num_actors)]
   learner = Learner.remote(config, storage, replay_buffer, state)
   workers = [learner] + actors
+
+  if not config.no_reanalyze_support:
+    reanalyze = Reanalyze.remote(config, storage, replay_buffer, state)
+    workers.append(reanalyze)
 
   print_launch_message(config, date)
   ray.get([worker.launch.remote() for worker in workers])
