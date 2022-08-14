@@ -125,7 +125,7 @@ class Actor(Logger):
 
   def play_game(self, game):
 
-    if self.config.fixed_temperatures is not None:
+    if not self.config.fixed_temperatures:
       self.temperature = self.config.visit_softmax_temperature(self.training_step)
 
     while not game.terminal:
